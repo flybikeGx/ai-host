@@ -4,7 +4,7 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 根 [AGENTS.md](AGENTS.md) 是 admin-agent 的指令，可以直接修改其管理方式。Python 不重新实现模型—工具循环，不调用 OpenAI-compatible 模型 API；模型请求由所选 CLI 负责。
 
-完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git/GitHub 与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
+完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git/Gitee 与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
 
 ## 直接开始
 

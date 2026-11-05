@@ -27,4 +27,4 @@ Windows 对应执行 `.venv\Scripts\agent-base.exe`。Windows 的 Python 管理�
 
 网页对话地址为 <http://127.0.0.1:8765/chat>，复用同一 serve 进程和模型凭据。生产前端文件已随项目构建，不需要启动单独 Node Web 服务或访问外部 CDN。只有修改 frontend 源码后才需要在该目录执行 `npm ci` 和 `npm run build`。详细说明见 [WebChat.md](WebChat.md)。
 
-需要带入内网时，参照 [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) 准备独立配置和目标平台依赖；`--skip-dsh` 本身不会完成引擎切换。推送 GitHub 或使用离线 bundle 见 [Git 交接说明](GIT_GUIDE.md)。
+需要带入内网时，参照 [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) 准备独立配置和目标平台依赖；`--skip-dsh` 本身不会完成引擎切换。推送 Gitee 或使用离线 bundle 见 [Git 交接说明](GIT_GUIDE.md)。
