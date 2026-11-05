@@ -1,0 +1,5 @@
+{
+  "name": "inventory",
+  "operation": "product",
+  "description": "对数值求积，生成库存组合报告"
+}

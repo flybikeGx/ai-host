@@ -1,0 +1,5 @@
+{
+  "name": "finance",
+  "operation": "sum",
+  "description": "对数值求和，生成财务汇总"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "research",
+  "operation": "mean",
+  "description": "对数值求平均，生成研究摘要"
+}

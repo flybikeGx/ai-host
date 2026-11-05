@@ -1,0 +1,25 @@
+schema_version: 1
+package:
+  name: scheduled-metrics-agent
+  version: 0.1.0
+task:
+  default: 读取本次输入，用 summarize_metrics 生成汇总报告并说明结果。
+tools:
+  local:
+    - name: summarize_metrics
+      description: 读取 input/metrics.json 和 activation.json，汇总指标并写出 report.json。
+      argv: ["${runtime.python}", "${package.root}/tools/summarize.py"]
+      input_schema:
+        type: object
+        properties: {}
+        additionalProperties: false
+      timeout_seconds: 30
+completion:
+  artifacts:
+    - path: artifacts/report.json
+      min_bytes: 10
+  checks:
+    - argv: ["${runtime.python}", "${package.root}/tools/verify.py"]
+      timeout_seconds: 10
+limits:
+  wall_timeout_seconds: 180

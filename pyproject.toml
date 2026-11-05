@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-base"
+version = "0.1.0"
+description = "Repository agent supervisor with a conversational administrator and swappable CLI runtimes"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6,<7", "jsonschema>=4,<5", "mcp>=1.20,<2", "psutil>=6,<8", "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "croniter>=6,<7"]
+
+[project.scripts]
+agent-base = "agent_base.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

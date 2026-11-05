@@ -1,0 +1,17 @@
+# 新机器使用 scripts/bootstrap.py 会生成包含本地 dsh 路径的配置。
+# 本模板使用 PATH 中的 dsh；复制到项目根 agent-base.toml 后再调整。
+[storage]
+root = ".agent-base"
+
+[queue]
+max_concurrent = 2
+
+[runtime]
+engine = "dsh"
+command = ["dsh"]
+provider = "deepseek-official"
+model = "deepseek-flash"
+effort = "high"
+timeout_seconds = 1800
+permission_mode = "workspace-write"
+approval_policy = "never"

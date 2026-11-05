@@ -1,0 +1,31 @@
+schema_version: 1
+package:
+  name: hello-agent
+  version: 0.1.0
+task:
+  default: 使用 write_report 工具生成示例报告，内容包含 AGENT_BASE_DEMO_OK，然后报告结果。
+tools:
+  local:
+    - name: write_report
+      description: 在本次工作区 artifacts/report.txt 写入文本，并返回实际文件路径。
+      argv: ["${runtime.python}", "${package.root}/tools/write_report.py"]
+      input_schema:
+        type: object
+        properties:
+          text: {type: string, minLength: 1}
+        required: [text]
+        additionalProperties: false
+      timeout_seconds: 20
+skills:
+  - name: concise-report
+    path: skills/concise-report
+completion:
+  artifacts:
+    - path: artifacts/report.txt
+      required: true
+      min_bytes: 1
+  checks:
+    - argv: ["${runtime.python}", "${package.root}/tools/verify_report.py"]
+      timeout_seconds: 20
+limits:
+  wall_timeout_seconds: 180
