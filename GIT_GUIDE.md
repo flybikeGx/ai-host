@@ -1,6 +1,6 @@
 # Git、GitHub 与内网交接
 
-`agent-base/` 是本项目的独立 Git 根目录，初始分支为 `main`。同级原 AI Hub、推理 MVP、旧设计目录不属于本仓库。未配置远程地址，也没有自动向 GitHub 上传文件。
+`agent-base/` 是本项目的独立 Git 根目录，初始分支为 `main`。同级原 AI Hub、推理 MVP、旧设计目录不属于本仓库。项目 GitHub 地址为 [flybikeGx/ai-host](https://github.com/flybikeGx/ai-host)，Agent Base 的内容直接放在仓库根目录。
 
 ## 1. 提交范围
 
@@ -18,15 +18,15 @@
 
 ## 2. 推送到 GitHub
 
-先在 GitHub 创建目标仓库。若希望直接推送本地历史，创建时不额外生成 README/License/gitignore，然后在本项目目录运行：
+本机 origin 使用 `git@github.com:flybikeGx/ai-host.git`。已经配置该地址时，在项目目录运行：
 
 ```sh
 git status
-git remote add origin YOUR_GITHUB_REPO_URL
+git remote -v
 git push -u origin main
 ```
 
-将 `YOUR_GITHUB_REPO_URL` 替换成实际 SSH 或 HTTPS 地址。若已经有 origin，先用 `git remote -v` 核对，再按需要使用 `git remote set-url origin YOUR_GITHUB_REPO_URL`。使用自己的 Git 认证，不在 URL 中嵌入 token。
+如果是没有 origin 的新副本，先执行 `git remote add origin git@github.com:flybikeGx/ai-host.git`。推送其他目标时，用 `git remote set-url origin YOUR_GITHUB_REPO_URL` 更换地址。使用自己的 Git 认证，不在 URL 中嵌入 token。
 
 若远端已有独立历史，先 fetch 和比较，再按团队方式合并；不默认 force push。本项目尚未选择开源许可证，在对外开源发布前由维护者确定许可。
 
