@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import threading
@@ -71,7 +72,11 @@ class Scheduler:
 
     def register(self, name: str, repo: str, *, task=None, ref=None, model=None, effort=None,
                  workspace_source=None, timeout_seconds=1800, cron=None, timezone="Asia/Shanghai",
-                 overlap="skip", now=None) -> dict:
+                 overlap="skip", now=None, run_at=None, schedule=None, installation_id=None) -> dict:
+        now = time.time() if now is None else now
+        if run_at is not None and (cron or isinstance(run_at, bool) or not isinstance(run_at, (int, float))
+                                   or not math.isfinite(run_at) or run_at <= now):
+            raise ValueError("一次性执行时间必须在未来，且不能同时设置 cron")
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name):
             raise ValueError("工作名须为 1–64 位字母、数字、下划线或连字符")
         if overlap not in {"skip", "allow"}:
@@ -92,11 +97,20 @@ class Scheduler:
                 raise ValueError("输入目录不可与基座状态目录重叠")
             workspace_source = str(source)
         spec = self.service.specification(repo, task, ref=ref, model=model, effort=effort)
+        if installation_id:
+            from .repositories import Repositories
+            installed = Repositories(self.service.config).get(installation_id)
+            if installed["origin"] != spec["repo"] or installed["commit_sha"] != ref or not installed["enabled"] or installed["status"] != "ready":
+                raise ValueError("定时计划的安装版本与仓库不匹配或已停用")
+            spec["installation_id"] = installation_id
         spec["runtime"]["timeout_seconds"] = timeout_seconds
         spec.update(temporary_workspace=True, workspace_source=workspace_source)
         definition = {"name": name, "spec": spec, "cron": cron, "timezone": timezone, "overlap": overlap}
-        now = time.time() if now is None else now
-        due = next_slot(cron, timezone, now) if cron else None
+        if run_at is not None:
+            definition["run_at"] = run_at
+        if schedule is not None:
+            definition["schedule"] = schedule
+        due = run_at if run_at is not None else next_slot(cron, timezone, now) if cron else None
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT id FROM works WHERE id=?", (name,)).fetchone():
@@ -121,6 +135,13 @@ class Scheduler:
         definition = work["definition"]
         due = next_slot(definition["cron"], definition["timezone"], time.time()) if enabled and definition["cron"] else None
         with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if enabled and definition.get("run_at") is not None:
+                if conn.execute("SELECT 1 FROM triggers WHERE work_id=? LIMIT 1", (name,)).fetchone():
+                    raise ValueError("一次性计划已触发，不能重复启用；请新建计划")
+                if definition["run_at"] <= time.time():
+                    raise ValueError("一次性计划的时间已过，请新建未来时间的计划")
+                due = definition["run_at"]
             conn.execute("UPDATE works SET enabled=?,next_due=? WHERE id=?", (int(enabled), due, name))
         return self.work(name)
 
@@ -148,6 +169,8 @@ class Scheduler:
             spec["activation"] = {"work_id": work["id"], "source": source, "key": key, "payload": payload, "at": now}
             run_id = self.store.insert(conn, spec, dispatched=0, work_id=work["id"])
         conn.execute("INSERT INTO triggers VALUES(?,?,?,?,?,?)", (work["id"], key, now, source, run_id, disposition))
+        if definition.get("run_at") is not None:
+            conn.execute("UPDATE works SET enabled=0,next_due=NULL WHERE id=?", (work["id"],))
         return {"work_id": work["id"], "key": key, "at": now, "source": source, "run_id": run_id, "disposition": disposition, "duplicate": False}
 
     def trigger(self, name, *, source="manual", key=None, payload=None):
@@ -182,7 +205,7 @@ class Scheduler:
                 # Coalesce missed slots into one durable activation after downtime.
                 results.append(self._trigger(conn, work, "cron", "cron:" + str(int(work["next_due"])),
                                              {"scheduled_at": work["next_due"], "coalesced_until": now}, now))
-                due = next_slot(definition["cron"], definition["timezone"], now)
+                due = None if definition.get("run_at") is not None else next_slot(definition["cron"], definition["timezone"], now)
                 conn.execute("UPDATE works SET next_due=? WHERE id=?", (due, work["id"]))
         return results
 

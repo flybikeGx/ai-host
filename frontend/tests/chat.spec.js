@@ -3,7 +3,8 @@ import {test,expect} from '@playwright/test';
 test('multi-turn admin, history, Markdown safety and reload',async({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('/chat');
-  await expect(page.getByRole('button',{name:/Admin Agent 管理与调度/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/与 Admin Agent 新建对话/})).toBeVisible();
+  await page.getByRole('button',{name:/与 Admin Agent 新建对话/}).click();
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('FIXTURE_MARKDOWN');
   await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await expect(page.getByRole('heading',{name:'测试回复',exact:true})).toBeVisible();
@@ -24,6 +25,7 @@ test('multi-turn admin, history, Markdown safety and reload',async({page})=>{
 
 test('reload reconnects to active generation without sending it again',async({page,request})=>{
   await page.goto('/chat');
+  await page.getByRole('button',{name:/与 Admin Agent 新建对话/}).click();
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('FIXTURE_STREAM');
   await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await expect(page.locator('.markdown')).toContainText('正在生成测试回复');
@@ -37,7 +39,7 @@ test('reload reconnects to active generation without sending it again',async({pa
 
 test('repo tools, shared resources and switching while a chat runs',async({page})=>{
   await page.goto('/chat');
-  await page.getByRole('button',{name:/finance-agent 仓库 Agent/}).click();
+  await page.getByRole('button',{name:/与 finance-agent 新建对话/}).click();
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('运行示例');
   await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await expect(page.locator('.markdown')).toContainText('fixture completed',{timeout:20000});
@@ -55,9 +57,9 @@ test('repo tools, shared resources and switching while a chat runs',async({page}
   await page.getByRole('textbox',{name:'消息',exact:true}).fill('FIXTURE_SLEEP');
   await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await expect(page.getByRole('button',{name:'停止回复',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:/Admin Agent 管理与调度/}).click();
+  await page.getByRole('button',{name:/与 Admin Agent 新建对话/}).click();
   await expect(page.getByRole('heading',{name:'和 Admin Agent 开始对话'})).toBeVisible();
-  await page.getByRole('button',{name:/finance-agent 仓库 Agent/}).click();
+  await page.getByRole('button',{name:/与 finance-agent 新建对话/}).click();
   await page.locator('.history-list button').first().click();
   await expect(page.getByRole('button',{name:'停止回复',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'停止回复',exact:true}).click();
@@ -67,10 +69,10 @@ test('repo tools, shared resources and switching while a chat runs',async({page}
 test('mobile composer and sidebar remain usable',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.goto('/chat');
-  await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'选择一个 Agent，开始新对话'})).toBeVisible();
   await page.getByRole('button',{name:'打开侧栏'}).click();
-  await expect(page.getByRole('button',{name:/finance-agent 仓库 Agent/})).toBeVisible();
-  await page.getByRole('button',{name:/finance-agent 仓库 Agent/}).click();
+  await expect(page.getByRole('button',{name:/与 finance-agent 新建对话/})).toBeVisible();
+  await page.getByRole('button',{name:/与 finance-agent 新建对话/}).click();
   await expect(page.getByRole('heading',{name:'和 finance-agent 开始对话'})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
   const composer=page.getByRole('textbox',{name:'消息',exact:true});

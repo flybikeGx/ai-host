@@ -1,5 +1,7 @@
 # 网页对话台
 
+2026-11-10 更新：新对话统一从 AGENTS 列表发起，最近对话新增独立的 Agent 筛选；Cmd/Ctrl+K 定位 Agent 列表。左侧“定时任务”进入独立 `/cron` 页面。最新交互与计划说明见 [SchedulingUI.md](SchedulingUI.md)。
+
 启动现有 Web 服务后访问 <http://127.0.0.1:8765/chat>。原工作调度和 Repo 资源页面仍在首页，两个页面互相有入口。
 
 ```sh
@@ -18,7 +20,7 @@
 - 独立停止按钮；切换会话、关闭标签页或断线只关闭查看连接，不取消生成。
 - 会话信息面板展示 namespace、skills、MCP 和原生 session ID。
 - repo 会话产物列表与下载，文件限于本会话 artifacts；Markdown 中的相对 artifacts 链接可直接下载。
-- 桌面与手机布局；Enter 发送、Shift+Enter 换行，中文输入法确认候选字时不会误发送。Cmd/Ctrl+K 新建对话。
+- 桌面与手机布局；Enter 发送、Shift+Enter 换行，中文输入法确认候选字时不会误发送。Cmd/Ctrl+K 定位 Agent 列表，从列表选择后发起新对话。
 
 当前 dsh 发布版以文本块发送 headless 输出；界面按真实事件更新，不模拟逐字输出。
 

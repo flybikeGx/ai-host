@@ -1,5 +1,7 @@
 # 工作调度与会话生命周期
 
+图形化入口见 [SchedulingUI.md](SchedulingUI.md)：`/cron` 支持选择已安装 Agent 的 entrypoint，指定日期执行一次，或配置每天/每周计划。一次性计划使用 run_at，触发后原子停用；下文原有 cron、队列和工作 API 继续兼容。
+
 `Work` 是可重复触发的工作定义，包含仓库/ref、任务、model/effort、输入工作区路径、执行时限、cron/时区及重叠策略。`Trigger` 是一次触发请求；`Run` 是实际执行；`Session` 是这个 Run 内 CLI 创建的会话。多次触发不会共享模型上下文。
 
 已安装的 v2 repo 会绑定 installation_id，复用固定 skills、环境和常驻 MCP；队列运行不重新安装资源。下文每 Run clone/冻结/安装步骤主要描述 v1 兼容路径。v2 的安装和挂载差异见 [RepoInstallation.md](RepoInstallation.md)。

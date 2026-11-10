@@ -8,11 +8,12 @@ import asyncio
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .mcp_server import public
@@ -65,12 +66,29 @@ class ChatUpdate(BaseModel):
     archived: bool | None = None
 
 
+class ScheduleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str
+    title: str | None = Field(default=None, max_length=100)
+    frequency: Literal["once", "daily", "weekly"] = "once"
+    date: str | None = None
+    time: str
+    timezone: str = "Asia/Shanghai"
+    weekdays: list[StrictInt] = Field(default_factory=list)
+    task: str | None = Field(default=None, max_length=65536)
+    model: str | None = None
+    effort: str | None = None
+    timeout_seconds: float = Field(default=1800, gt=0, le=86400)
+
+
 def create_app(config, *, background=True):
     scheduler = Scheduler(config)
     from .repositories import Repositories
     repositories = Repositories(config)
     from .conversations import Conversations, ConversationBusy
     conversations = Conversations(config)
+    from .schedules import Schedules
+    schedules = Schedules(scheduler)
     token = os.environ.get("AGENT_BASE_WEB_TOKEN")
 
     @asynccontextmanager
@@ -114,6 +132,7 @@ def create_app(config, *, background=True):
         app.mount("/chat/assets", StaticFiles(directory=static / "assets"), name="chat-assets")
 
     @app.get("/chat", response_class=HTMLResponse)
+    @app.get("/cron", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
@@ -229,6 +248,34 @@ def create_app(config, *, background=True):
     @app.post("/api/works/{name}/resume", dependencies=api)
     def resume(name: str):
         return scheduler.enable(name, True)
+
+    @app.get("/api/schedules/catalog", dependencies=api)
+    def schedule_catalog():
+        return schedules.catalog()
+
+    @app.get("/api/schedules", dependencies=api)
+    def schedule_list():
+        return schedules.list()
+
+    @app.post("/api/schedules/preview", dependencies=api)
+    def schedule_preview(body: ScheduleInput):
+        return schedules.preview(body.model_dump())
+
+    @app.post("/api/schedules", dependencies=api, status_code=201)
+    def schedule_create(body: ScheduleInput):
+        return schedules.create(body.model_dump())
+
+    @app.post("/api/schedules/{name}/pause", dependencies=api)
+    def schedule_pause(name: str):
+        return schedules.enable(name, False)
+
+    @app.post("/api/schedules/{name}/resume", dependencies=api)
+    def schedule_resume(name: str):
+        return schedules.enable(name, True)
+
+    @app.get("/api/schedules/{name}/runs", dependencies=api)
+    def schedule_runs(name: str):
+        return schedules.runs(name)
 
     @app.get("/api/works/{name}/triggers", dependencies=api)
     def triggers(name: str):

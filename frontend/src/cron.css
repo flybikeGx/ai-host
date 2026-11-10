@@ -1,0 +1,104 @@
+.page-nav{display:flex;gap:5px;margin:0 5px 24px;padding:4px;background:#e6eaf1;border-radius:9px}
+.page-nav button{display:flex;align-items:center;justify-content:center;gap:8px;flex:1;border-radius:6px;padding:8px 5px;color:#8490a4;font-size:12px}
+.page-nav button.active{background:#fff;color:#4a60a8;box-shadow:0 1px 4px #24365b0a}
+.agent-create-hint{font-size:10px;color:#9ca6b7;margin:-3px 11px 8px}
+.agent-create-plus{color:#8e9fbe;margin-left:auto;flex-shrink:0}
+.agent-list{max-height:36vh;overflow-y:auto;flex-shrink:0}
+.history-filter{margin:0 8px 10px;width:calc(100% - 16px);padding:7px 9px;border:1px solid #e0e5ed;border-radius:7px;background:#f7f8fb;color:#7c89a0;font-size:10px;min-width:0}
+.history-item small{display:block;font-weight:400;color:#a0aabc;font-size:9px;margin-top:4px;overflow:hidden;text-overflow:ellipsis}
+.agent-picker{margin-top:clamp(80px,18vh,210px)}
+.cron-panel{background:#f8f9fc}
+.cron-scroll{overflow-y:auto;flex:1;padding:34px 38px 45px;scrollbar-gutter:stable}
+.cron-scroll>*{max-width:1120px;margin-left:auto;margin-right:auto}
+.cron-intro{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}
+.cron-intro>.lucide{color:#9baccf;flex-shrink:0;margin-right:8px}
+.cron-intro h2{font-size:26px;font-weight:550;letter-spacing:-.6px;color:#35435e;margin:10px 0}
+.cron-intro p{font-size:12px;color:#97a2b5;line-height:1.9;margin:0}
+.cron-primary,.cron-secondary{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 15px;border-radius:8px;font-size:12px;white-space:nowrap}
+.cron-primary{background:#586ec6;color:white;box-shadow:0 2px 5px #4a62b61a}
+.cron-primary:hover{background:#485eb4}
+.cron-secondary{background:white;border:1px solid #dce3f0;color:#677cae}
+.cron-secondary:hover{border-color:#acbcdf;background:#fafbff}
+.cron-notice{display:flex;align-items:center;justify-content:space-between;border:1px solid #d9e9df;background:#f4faf6;color:#72927e;font-size:12px;border-radius:8px;padding:8px 12px;margin-bottom:18px}
+.cron-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;margin-bottom:28px}
+.cron-metrics>div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 23px;background:white;border:1px solid #e7ebf3;border-radius:11px}
+.cron-metrics span{font-size:11px;color:#94a0b5}
+.cron-metrics strong{font-size:27px;font-weight:500;color:#6579af;font-variant-numeric:tabular-nums}
+.cron-layout{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;gap:24px}
+.cron-layout.with-builder{grid-template-columns:minmax(0,1fr) 360px}
+.cron-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.cron-section-heading h3{font-size:13px;font-weight:550;color:#63718b;margin:0}
+.cron-section-heading h3>span{font-size:10px;color:#a0abc0;margin-left:7px}
+.cron-section-heading p{font-size:10px;color:#a0adbf;margin:6px 0 0}
+.cron-empty{padding:65px 20px;display:flex;flex-direction:column;align-items:center;gap:15px;background:#ffffff80;border:1px dashed #dce3f0;border-radius:12px;color:#a1aec5;text-align:center}
+.cron-empty h3{font-size:16px;font-weight:500;color:#7b8ba8;margin:3px 0 0}
+.cron-empty p{font-size:11px;margin:0 0 6px;line-height:1.8}
+.cron-empty-icon{display:grid;place-items:center;width:58px;height:58px;border-radius:16px;background:#eef2fa;color:#91a3c7}
+.cron-plan-list{min-width:0}
+.cron-plan{background:white;border:1px solid #e2e7f1;border-radius:11px;margin-bottom:13px;padding:21px 22px 0;overflow:hidden}
+.cron-plan-top{display:flex;align-items:center;gap:12px}
+.cron-plan-icon{width:37px;height:37px;border-radius:10px;background:#eff3fc;display:grid;place-items:center;color:#849ac7;flex-shrink:0}
+.cron-plan-top>div{min-width:0}
+.cron-plan h3{font-size:13px;font-weight:550;color:#5d6e8d;margin:0 0 6px;overflow-wrap:anywhere}
+.cron-plan-top p{font-size:10px;color:#9ba8bf;margin:0}
+.cron-plan-top p span{color:#b4bdcd}
+.cron-badge{margin-left:auto;flex-shrink:0;font-size:9px;letter-spacing:.25px;padding:5px 8px;border-radius:5px;background:#f2f4f8;color:#9da8ba}
+.cron-badge.enabled{background:#eff6f2;color:#7d9f8c}
+.cron-badge.done{background:#eff2fa;color:#8596bc}
+.cron-plan-timing{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:22px}
+.cron-plan-timing strong{font-size:12px;font-weight:500;color:#7b8cab;line-height:1.8}
+.cron-plan-timing>span{font-size:9px;color:#a8b4c7;white-space:nowrap}
+.cron-next{font-size:11px;display:flex;gap:12px;margin:11px 0 20px;color:#7c8caa;line-height:1.7}
+.cron-next>span{color:#b0bacb}
+.cron-plan-bottom{display:flex;align-items:center;gap:15px;border-top:1px solid #edf0f6;padding:12px 0}
+.cron-latest{font-size:10px;color:#a1adc2;margin-right:auto;display:flex;align-items:center;gap:6px}
+.cron-text-button{display:inline-flex;align-items:center;gap:5px;color:#8194b9;font-size:10px;padding:4px 0;white-space:nowrap}
+.cron-text-button:hover{color:#4c67aa}
+.cron-builder{background:white;border:1px solid #dfe6f2;box-shadow:0 3px 16px #3a538305;border-radius:12px;padding:22px;position:sticky;top:0;min-width:0}
+.cron-builder label{display:block;font-size:11px;color:#8899b6;line-height:1.8;min-width:0}
+.cron-builder label>input,.cron-builder label>select,.cron-builder label>textarea{display:block;width:100%;min-width:0;border:1px solid #e0e6f1;border-radius:7px;background:#fcfdff;padding:10px;margin:6px 0 16px;color:#7385a5;font-size:12px}
+.cron-builder label>textarea{resize:vertical;max-height:220px}
+.cron-builder input[type=date],.cron-builder input[type=time]{min-height:39px;padding:8px;font-size:11px}
+.cron-builder input::placeholder,.cron-builder textarea::placeholder{color:#b3bdce}
+.cron-entrypoint{font-size:10px;background:#f6f8fd;border:1px solid #e7edf8;border-radius:6px;color:#98a8c3;padding:9px 11px;margin:-5px 0 16px}
+.cron-entrypoint summary,.cron-advanced summary{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none}
+.cron-entrypoint pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto;font:10px/1.9 inherit;color:#9daec8}
+.cron-builder fieldset{border:0;padding:0;margin:0 0 17px;min-width:0}
+.cron-builder legend{font-size:11px;color:#8899b6;margin-bottom:9px}
+.cron-frequency{display:flex;gap:5px}
+.cron-frequency>label{flex:1;position:relative}
+.cron-builder .cron-frequency input,.cron-builder .cron-weekdays input{position:absolute;inset:0;width:100%;height:100%;padding:0;margin:0;opacity:0;z-index:1;cursor:pointer}
+.cron-frequency label>span{display:block;text-align:center;border:1px solid #e5eaf3;background:#fafbfe;border-radius:6px;padding:8px 5px;color:#a0acc0;cursor:pointer}
+.cron-frequency input:checked+span{color:#657fb6;background:#eef2fc;border-color:#cad7ef}
+.cron-frequency input:focus-visible+span,.cron-weekdays input:focus-visible+span{outline:2px solid #9bb1e2;outline-offset:2px}
+.cron-date-row{display:flex;gap:12px}
+.cron-date-row>label{flex:1}
+.cron-weekdays{display:flex;gap:5px}
+.cron-weekdays>label{flex:1;position:relative}
+.cron-weekdays label>span{display:block;text-align:center;padding:6px 1px;border:1px solid #e4eaf4;background:#fafbfe;border-radius:6px;color:#acb7cb;cursor:pointer;font-size:10px}
+.cron-weekdays input:checked+span{background:#edf2fd;color:#728bbf;border-color:#cbd8f3}
+.cron-preview{background:#f5f7fc;border:1px solid #e8edf7;border-radius:8px;padding:12px;font-size:11px;color:#9eacc3;margin-bottom:17px;line-height:1.8}
+.cron-preview strong{display:block;font-size:10px;color:#879bbc;font-weight:500;margin-bottom:5px}
+.cron-preview time{display:block;color:#7b8eaf;font-size:11px}
+.cron-preview small{display:block;font-size:9px;margin-top:6px;color:#a3afc3}
+.cron-preview-error{color:#b58880}
+.cron-advanced{font-size:11px;color:#9aabc6;margin:0 0 18px;border-top:1px solid #edf1f7;padding-top:14px}
+.cron-advanced[open]>summary{margin-bottom:15px}
+.cron-submit{width:100%}
+.cron-help{font-size:10px;color:#a9b5c8;line-height:1.9;margin:13px 0 0}
+.cron-history-modal{width:620px;max-width:100%;max-height:85dvh;overflow:auto;background:white;border-radius:13px;padding:24px;border:1px solid #e2e8f3;box-shadow:0 18px 60px #22335424}
+.cron-run{display:flex;align-items:center;gap:20px;padding:16px 0;border-top:1px solid #edf1f7}
+.cron-run>div{min-width:0;flex:1}
+.cron-run strong{font-size:12px;font-weight:500;color:#7588aa}
+.cron-run small{display:block;color:#a8b5ca;font-size:10px;margin-top:6px}
+.cron-run p{font-size:10px;color:#b69188;overflow-wrap:anywhere;line-height:1.8;margin-bottom:0}
+.cron-report{border:1px solid #e4eaf4;background:#f8fafe;padding:15px;border-radius:8px;margin-top:16px}
+.cron-report h4{margin:0 0 12px;font-size:12px;font-weight:500;color:#7d91b6}
+.cron-report dl{display:grid;grid-template-columns:65px minmax(0,1fr);gap:10px;font-size:11px;color:#8ca0c1;line-height:1.8}
+.cron-report dt{color:#acb8cc}
+.cron-report dd{margin:0;overflow-wrap:anywhere}
+.cron-report summary{font-size:10px;color:#9baccc;cursor:pointer}
+.cron-report pre{font-size:10px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto}
+@media(min-width:1450px){.cron-layout.with-builder{grid-template-columns:minmax(0,1fr) 390px}.cron-plan-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:18px}.cron-plan-list>.cron-section-heading,.cron-plan-list>.cron-empty{grid-column:1/-1}.with-builder .cron-plan-list{display:block}}
+@media(max-width:1100px){.cron-scroll{padding:25px}.cron-layout.with-builder{grid-template-columns:minmax(0,1fr)}.cron-builder{grid-row:1;position:static}.cron-intro h2{font-size:23px}}
+@media(max-width:720px){.cron-scroll{padding:22px 16px 32px}.cron-intro{gap:14px}.cron-intro>.lucide{width:30px;height:30px}.cron-intro h2{font-size:21px}.cron-intro p{font-size:11px}.cron-metrics{gap:8px;margin-bottom:22px}.cron-metrics>div{padding:14px 10px;display:block}.cron-metrics span{font-size:10px}.cron-metrics strong{display:block;font-size:25px;margin-top:7px}.cron-plan{padding:16px 15px 0}.cron-plan-timing{flex-wrap:wrap}.cron-builder{padding:19px 17px}.cron-primary{font-size:11px;padding:9px 12px}.cron-history-modal{padding:20px 17px}.history-heading{margin-top:22px}.agent-list{max-height:30vh}}

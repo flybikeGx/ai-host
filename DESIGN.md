@@ -4,6 +4,8 @@
 
 2026-11-10 补充：已增加 [本地 Agent 导出指南](export-guild.md)、[entrypoint 与结构化汇报契约](RepoContract.md)。下文原验收表保留初版记录，新功能测试与真实 dsh 结果见 [VALIDATION.md](VALIDATION.md)。用户隔离设计暂缓实施。
 
+同日界面补充：[图形化定时任务](SchedulingUI.md) 支持真正的一次性 run_at 计划和每天/每周配置；对话统一从 AGENTS 列表发起，历史可按 Agent 筛选。
+
 本文描述**已经实现的系统**；未实现项集中列在文末 TODO。入口文档见 [README](README.md)，安装步骤见 [Installation.md](Installation.md)，内网切换见 [CodeAgent 迁移指南](CODEAGENT_MIGRATION.md)。
 
 ## 1. 项目目标与运行方式

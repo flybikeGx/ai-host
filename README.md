@@ -38,6 +38,8 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 
 ## 网页对话
 
+从 AGENTS 列表选择 Agent 发起新对话；最近对话默认显示全部，可按 Agent 筛选。独立 [定时页面](SchedulingUI.md) 位于 `/cron`，可图形化选择 Agent、一次性日期或每天/每周计划，使用 entrypoint 并查看结构化报告。
+
 启动 `.venv/bin/agent-base serve` 后打开 <http://127.0.0.1:8765/chat>，可以与 Admin Agent 和所有已安装 repo Agent 多轮对话。支持历史、实时文本与工具卡片、断线恢复、停止回复、模型/推理强度选择以及会话产物下载；repo 沿用固定 skills 和常驻 MCP。
 
 会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原调度页面仍在首页。设计参考、接口和测试见 [WebChat.md](WebChat.md)。

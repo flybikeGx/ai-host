@@ -1,5 +1,15 @@
 # 初版验证记录
 
+## 2026-11-10：对话入口与图形化定时任务
+
+- 完整 Python 回归 82 项通过，新增 14 项覆盖安装版本绑定、一次性触发去重、停机补触发、暂停/恢复、时区与夏令时边界、API 认证和实际 entrypoint 报告。
+- Playwright Chrome 8 项通过：原有聊天交互、Agent 列表唯一创建入口、独立历史筛选、跨页面保留 Token、图形化计划、暂停/恢复、运行记录/报告、手机布局与无横向溢出。使用独立测试数据、fake CLI 和真实本机 MCP。
+- 真实验收由 Chrome 页面创建一次性计划 `schedule-d86b92df56b04ae59f0ade3b94dd1715`，指定 **2026-11-10 15:34 Asia/Shanghai**。实际时钟到点后，常驻调度器创建 Run `33059347f56641adb508eb9b185d1c5e`，真实 dsh 按 entrypoint 调用演示 MCP 得到数值 10；最终为 succeeded / checks_passed，Agent 自报 completed。
+- 真实计划只有一个 Run，触发后 enabled=false、next_due=null，MCP boot_id 未变。没有保留周期任务。演示 `scheduled-analysis-agent` 仍可从 Agent 列表选择，旧三个 Repo 的安装与历史未修改。
+- 网页、`/cron` 和新 API 已在本机 serve 中加载。截图保存在 docs/assets；原始验收收据位于 `.agent-base/validations/graphical-schedule-1794295954561/result.json`，不提交业务运行数据。
+
+界面与 API 说明见 [SchedulingUI.md](SchedulingUI.md)。
+
 ## 2026-11-10：Repo 引入契约增强
 
 - Python 回归：68 项通过，其中新增 entrypoint/报告相关 20 项。包含入口单独启动、cron、准备后启动、冻结源、v2 常驻 MCP 复用、普通网页对话不注入入口、错误报告/blocked、额外产物归档、超时/取消及报告 HTTP 接口。
