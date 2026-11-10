@@ -36,7 +36,7 @@ def check_prompts(root: Path) -> list[dict]:
         relative = file.relative_to(root)
         if any(part in IGNORED for part in relative.parts):
             continue
-        if file.name not in {"AGENTS.md", "SKILL.md"} and "skills" not in relative.parts and not any(file.is_relative_to(parent) for parent in skill_roots):
+        if file.name not in {"AGENTS.md", "SKILL.md", "entrypoint.md"} and "skills" not in relative.parts and not any(file.is_relative_to(parent) for parent in skill_roots):
             continue
         issues.extend(lint_text(file.read_text(encoding="utf-8"), relative.as_posix()))
     return issues
@@ -45,5 +45,5 @@ def check_prompts(root: Path) -> list[dict]:
 def require_portable(root: Path):
     issues = check_prompts(root)
     if issues:
-        raise ValueError("AGENTS/skill 包含绝对路径：" + "; ".join(
+        raise ValueError("AGENTS/entrypoint/skill 包含绝对路径：" + "; ".join(
             f"{item['file']}:{item['line']} {item['path']}" for item in issues[:20]))

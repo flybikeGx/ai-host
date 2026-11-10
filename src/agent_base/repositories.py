@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .engines import runtime_environment
-from .package import expand, freeze, load_package, within
+from .package import expand, freeze, load_package, within, instruction_hashes
 from .processes import alive, identity, kill_tree, run_process, spawn_options
 from .store import Store
 
@@ -171,7 +171,8 @@ class Repositories:
             (install_root / "token").write_text(secrets.token_urlsafe(32))
             (install_root / "token").chmod(0o600)
             (install_root / "receipt.json").write_text(json.dumps({"installation_id": digest, "repo_id": repo_id,
-                "commit": commit, "ref": ref, "namespace": "repo_" + repo_id, "manifest": manifest}, ensure_ascii=False, indent=2))
+                "commit": commit, "ref": ref, "namespace": "repo_" + repo_id, "manifest": manifest,
+                **instruction_hashes(source)}, ensure_ascii=False, indent=2))
             self.ensure_service(digest)
             self.update(digest, status="ready", error=None)
         except BaseException as error:

@@ -63,6 +63,8 @@ mcp:
 
 只加载声明的 skills 和 MCP。安装依赖、命令与接入层内部可以使用基座解析出的实际路径；仓库的 AGENTS.md 和 skill 文档使用相对路径。
 
+新 repo 还应提供根 entrypoint.md，定义无人值守工作。每次 Run 由基座注入 AGENTS + entrypoint + 本次参数 + 统一汇报契约；报告格式不放入安装清单。入口和技能一起冻结并检查相对路径，普通对话不自动执行入口。旧 task.default 的回退与结构化最终回复见 [RepoContract.md](RepoContract.md)，本地能力导出见 [export-guild.md](export-guild.md)。
+
 ## 生命周期与资源位置
 
 ```text
@@ -151,7 +153,7 @@ admin MCP 对应 install_repo_resources、list_repo_resources、get_repo_resourc
 .venv/bin/python scripts/check_prompt_paths.py examples/repo-resources
 ```
 
-扫描所有 AGENTS.md、SKILL.md、skills 目录及发现的 skill 子目录中的 Markdown；报告文件、行号、列号及命中的路径。检测常见 POSIX、Windows 盘符、UNC、file URI、HOME/用户目录写法，忽略 HTTP URL、相对路径和 prompt XML 标签。退出码 1 表示检查失败。
+扫描所有 AGENTS.md、entrypoint.md、SKILL.md、skills 目录及发现的 skill 子目录中的 Markdown；报告文件、行号、列号及命中的路径。检测常见 POSIX、Windows 盘符、UNC、file URI、HOME/用户目录写法，忽略 HTTP URL、相对路径和 prompt XML 标签。退出码 1 表示检查失败。
 
 v2 安装前后自动执行同一检查，生成的任务 prompt 也检查且不注入安装目录等绝对文件路径。静态检查针对文档中的路径字面量，不分析动态生成路径的任意程序。真实 CLI 自身生成的环境描述不在这个检查器的控制范围内。
 

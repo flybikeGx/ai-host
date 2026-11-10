@@ -62,4 +62,20 @@ elif "FIXTURE_NO_ARTIFACT" not in text:
 answer = "fixture completed"
 if "FIXTURE_MARKDOWN" in text:
     answer = "## 测试回复\n\n- **中文内容**\n- `relative/path`\n\n```python\nprint('hello')\n```\n\n<script>window.__xss=true</script>\n[unsafe](javascript:alert(1))"
+if "<agent_base_report_contract>" in text:
+    if "REPORT_ONLY_EXTRA" in text:
+        Path("artifacts").mkdir(exist_ok=True)
+        Path("artifacts/extra.txt").write_text("extra output")
+    report = {"schema_version": 1, "status": "completed", "summary": "fixture completed",
+              "artifacts": [{"path": p.as_posix()} for p in sorted(Path("artifacts").glob("*")) if p.is_file()],
+              "checks": [], "issues": [], "next_steps": []}
+    if "REPORT_BLOCKED" in text:
+        report.update(status="blocked", issues=["需要业务输入"], next_steps=["补充 input 数据"])
+    if "REPORT_MISSING" in text:
+        report["artifacts"].append({"path": "artifacts/missing.json"})
+    if "REPORT_FAILED_CHECK" in text:
+        report["checks"] = [{"name": "agent self check", "status": "failed"}]
+    if "REPORT_SELF_CHECK" in text:
+        report["checks"] = [{"name": "agent self check", "status": "passed"}]
+    answer = "not JSON" if "REPORT_INVALID" in text else json.dumps(report, ensure_ascii=False)
 print(json.dumps({"type": "final", "text": answer}, ensure_ascii=False))

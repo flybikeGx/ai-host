@@ -246,6 +246,15 @@ def create_app(config, *, background=True):
     def events(run_id: str, after: int = 0):
         return scheduler.store.events(run_id, after)
 
+    @app.get("/api/runs/{run_id}/report", dependencies=api)
+    def report(run_id: str):
+        job = scheduler.service.get(run_id)
+        from .reports import write_run_report
+        path = write_run_report(job)
+        if path is None:
+            raise HTTPException(409, "只有已结束的仓库任务有执行报告；对话和仅安装不生成报告")
+        return json.loads(path.read_text(encoding="utf-8"))
+
     @app.post("/api/runs/{run_id}/cancel", dependencies=api)
     def cancel(run_id: str):
         return public(scheduler.service.cancel(run_id))

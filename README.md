@@ -4,7 +4,19 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 根 [AGENTS.md](AGENTS.md) 是 admin-agent 的指令，可以直接修改其管理方式。Python 不重新实现模型—工具循环，不调用 OpenAI-compatible 模型 API；模型请求由所选 CLI 负责。
 
-完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git/Gitee 与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
+完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
+
+Repo 引入：[本地 Agent 导出指南](export-guild.md) · [entrypoint 与结构化结果契约](RepoContract.md)。
+
+搁置设计：[用户隔离草案](USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
+
+## Repo 引入与无人值守入口
+
+将本地 Agent 整理为完整 repo，可把 [export-guild.md](export-guild.md) 交给本地编码 Agent。新导出的 repo 提供 AGENTS.md、Installation.md 和根 entrypoint.md：分别定义长期角色、安装资源和无人值守工作流程。
+
+CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基座组合 `AGENTS.md + entrypoint.md + 本次参数/触发说明 + 如何汇报结果`。报告要求由基座动态注入，repo 不复制维护。普通网页/Admin 对话不自动执行 entrypoint。
+
+最终回复必须符合结构化 JSON 契约，解析到 `result.agent_report`；基座另写运行目录内的 `report.json`，记录可信状态、独立检查和归档产物。blocked、格式错误或产物缺失不会被判为成功。没有 entrypoint 的旧 repo 仍可使用 task/task.default，但实际 Run 也执行新的最终汇报契约。完整字段与兼容说明见 [RepoContract.md](RepoContract.md)。
 
 ## 直接开始
 

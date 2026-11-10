@@ -15,7 +15,8 @@ from urllib.parse import urlparse
 
 from .config import Config, validate_selection
 from .engines import codeagent_command, dsh_command, dsh_patch, parse_dsh_output, runtime_environment
-from .package import build_prompt, expand, freeze, instruction_hash, within, load_package
+from .package import build_prompt, expand, freeze, instruction_hashes, within, load_package, resolve_task
+from .reports import parse_agent_report, write_run_report
 from .processes import Cancelled, DeadlineExceeded, alive, identity, kill_tree, run_process, spawn_options
 from .store import ACTIVE, TERMINAL, Store
 
@@ -75,7 +76,9 @@ class Service:
                 self.store.update(job["id"], pid=proc.pid, birth=identity(proc.pid))
             except OSError as error:
                 self.store.update(job["id"], status="failed", error=f"启动任务进程失败：{error}")
-        return self.store.get(job["id"])
+        job = self.store.get(job["id"])
+        write_run_report(job)
+        return job
 
     def start_prepared(self, run_id: str, task: str | None = None) -> dict:
         with self.store.connection() as conn:
@@ -109,10 +112,14 @@ class Service:
                     if alive(job["process_pid"], job["process_birth"]):
                         kill_tree(job["process_pid"], job["process_birth"])
                     self.store.event(job["id"], "run.interrupted", {})
+                    write_run_report(self.store.get(job["id"]))
 
     def get(self, run_id: str) -> dict:
         self.reconcile()
-        return self.store.get(run_id)
+        job = self.store.get(run_id)
+        if job["status"] in TERMINAL and not (Path(job["root"]) / "report.json").is_file():
+            write_run_report(job)
+        return job
 
     def list(self, limit=30) -> list[dict]:
         self.reconcile()
@@ -126,7 +133,9 @@ class Service:
                 conn.execute("UPDATE runs SET cancel_requested=1,updated=? WHERE id=?", (time.time(), run_id))
                 conn.execute("UPDATE runs SET status='cancelled',finished_at=?,session_status='not_started' WHERE id=? AND status='queued' AND dispatched=0", (time.time(), run_id))
             self.store.event(run_id, "run.cancel_requested", {})
-        return self.store.get(run_id)
+        job = self.store.get(run_id)
+        write_run_report(job)
+        return job
 
     def wait(self, run_id: str, seconds: float = 30) -> dict:
         until = time.time() + max(0, min(seconds, 300))
@@ -153,6 +162,7 @@ class Service:
         runtime = spec["runtime"]
         env = runtime_environment(runtime, root / "dsh-home")
         temporary = None
+        result = {"report_path": str(root / "report.json"), "verification": "not_verified"}
         try:
             while not self.store.claim(run_id, spec["max_concurrent"]):
                 if cancel():
@@ -229,7 +239,7 @@ class Service:
                     activation_file.write_text(json.dumps(spec["activation"], ensure_ascii=False, indent=2), encoding="utf-8")
                 if not installation_id:
                     manifest = freeze(workspace, root / "package")
-                    receipt = {"repo": spec["repo"], "commit": sha, "instructions_sha256": instruction_hash(root / "package"), "runtime": runtime}
+                    receipt = {"repo": spec["repo"], "commit": sha, **instruction_hashes(root / "package"), "runtime": runtime}
                     (root / "receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
                     if manifest.get("environment", {}).get("lockfile"):
                         if not shutil.which("uv"):
@@ -254,15 +264,18 @@ class Service:
                 self.store.update(run_id, status="prepared", result={"workspace": str(workspace), "receipt": str(root / "receipt.json")})
                 self.store.event(run_id, "run.prepared", {})
                 return
-            task = spec.get("task") or manifest.get("task", {}).get("default")
-            if not task or not task.strip():
-                raise ValueError("没有本次任务。请提交 task，或在 agent.yaml 中声明 task.default。可先 install 检查仓库。")
+            task = resolve_task(root / "package", manifest, spec.get("task"))
             prompt = root / "prompt.txt"
             if spec.get("installation_id"):
                 from .repo_runtime import repo_prompt
-                prompt.write_text(repo_prompt(root / "package", workspace, manifest, task), encoding="utf-8")
+                prompt.write_text(repo_prompt(root / "package", workspace, manifest, task, unattended=True), encoding="utf-8")
             else:
                 prompt.write_text(build_prompt(root / "package", workspace, manifest, task), encoding="utf-8")
+            (root / "prompt-contract.json").write_text(json.dumps({
+                "report_schema_version": 1, **instruction_hashes(root / "package"),
+                "prompt_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest(),
+                "entrypoint": "entrypoint.md" if (root / "package" / "entrypoint.md").exists() else None,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
             engine = runtime.get("engine", "dsh")
             if engine == "dsh":
                 if spec.get("installation_id"):
@@ -309,11 +322,21 @@ class Service:
             if code:
                 raise RuntimeError(f"{engine} 退出码 {code}；见 {root / 'runtime.stderr.log'} 和 runtime.jsonl")
             result = parse_dsh_output(output) if engine == "dsh" else {"text": output.read_text(encoding="utf-8"), "session_id": None}
+            result.update(report_path=str(root / "report.json"), verification="not_verified")
             self.store.update(run_id, session_id=result.get("session_id"), status="verifying", session_status="finished")
+            report = parse_agent_report(result["text"], workspace)
+            result["agent_report"] = report
+            if report["status"] != "completed":
+                raise ValueError(f"Agent 报告状态 {report['status']}：{report['summary']}")
+            if any(check["status"] == "failed" for check in report["checks"]):
+                raise ValueError("Agent 报告 completed 但包含失败检查")
             for i, check in enumerate(manifest.get("completion", {}).get("checks", [])):
                 command(expand(check["argv"], root / "package", workspace, python), f"verify-{i}", timeout=check.get("timeout_seconds", 120))
             artifacts = []
-            for artifact in manifest.get("completion", {}).get("artifacts", []):
+            artifact_specs = {a["path"]: dict(a) for a in manifest.get("completion", {}).get("artifacts", [])}
+            for artifact in report["artifacts"]:
+                artifact_specs.setdefault(artifact["path"], {"path": artifact["path"]})["required"] = True
+            for artifact in artifact_specs.values():
                 file = within(workspace, artifact["path"], exists=False)
                 if not file.is_file():
                     if artifact.get("required", True):
@@ -326,7 +349,8 @@ class Service:
                 target = root / "artifacts" / artifact["path"]
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, target)
-                artifacts.append({"path": str(target), "sha256": hashlib.sha256(target.read_bytes()).hexdigest(), "size": target.stat().st_size})
+                artifacts.append({"path": str(target), "relative_path": artifact["path"],
+                                  "sha256": hashlib.sha256(target.read_bytes()).hexdigest(), "size": target.stat().st_size})
             if cancel():
                 raise Cancelled("任务已取消")
             if time.time() >= deadline:
@@ -348,7 +372,8 @@ class Service:
         except BaseException as error:
             traceback.print_exc()
             status = "cancelled" if isinstance(error, Cancelled) else "timed_out" if isinstance(error, DeadlineExceeded) else "failed"
-            self.store.update(run_id, status=status, session_status=status, error=str(error))
+            self.store.update(run_id, status=status, session_status=status, error=str(error), result=result)
             self.store.event(run_id, "run.finished", {"status": status, "error": str(error)})
         finally:
             self.store.update(run_id, process_pid=None, process_birth=None)
+            write_run_report(self.store.get(run_id))

@@ -1,6 +1,6 @@
-# Git、Gitee 与内网交接
+# Git、双远端与内网交接
 
-`agent-base/` 是本项目的独立 Git 根目录，初始分支为 `main`。同级原 AI Hub、推理 MVP、旧设计目录不属于本仓库。项目主仓库为 [Gitee：flybike/ai-host](https://gitee.com/flybike/ai-host)，Agent Base 的内容直接放在仓库根目录。开发机将原 GitHub 地址保留为 `github` remote，`origin` 指向 Gitee。
+`agent-base/` 是本项目的独立 Git 根目录，初始分支为 `main`。同级原 AI Hub、推理 MVP、旧设计目录不属于本仓库。项目保留两个远端：`origin` 为 [GitHub：flybikeGx/ai-host](https://github.com/flybikeGx/ai-host)，`gitee` 为 [Gitee：flybike/ai-host](https://gitee.com/flybike/ai-host)。Agent Base 的内容直接放在两个仓库的根目录。
 
 ## 1. 提交范围
 
@@ -16,17 +16,25 @@
 
 静态前端有意入库，使内网直接运行 Python 服务即可显示网页。修改前端后先 `npm run build`，再同时提交源码与构建文件。依赖锁文件有意入库，安装时使用 frozen/ci。
 
-## 2. 推送到 Gitee
+## 2. 推送两个远端
 
-本机 origin 使用 `git@gitee.com:flybike/ai-host.git`。已经配置该地址时，在项目目录运行：
+本机保留以下配置，`main` 跟踪 `origin/main`：
+
+```text
+origin  git@github.com:flybikeGx/ai-host.git
+gitee   git@gitee.com:flybike/ai-host.git
+```
+
+在项目目录分别推送，普通 `git push` 只会推送默认上游，不会自动同步另一个远端：
 
 ```sh
 git status
 git remote -v
 git push -u origin main
+git push gitee main
 ```
 
-如果是没有 origin 的新副本，先执行 `git remote add origin git@gitee.com:flybike/ai-host.git`。推送其他目标时，用 `git remote set-url origin YOUR_GIT_REPO_URL` 更换地址。使用自己的 Git 认证，不在 URL 中嵌入 token。
+如果是没有远端的新副本，可分别执行 `git remote add origin git@github.com:flybikeGx/ai-host.git` 和 `git remote add gitee git@gitee.com:flybike/ai-host.git`。从 Gitee 克隆时，Git 会默认将该地址命名为 origin；需要保持上述约定时，先将它重命名为 gitee，再添加 GitHub origin。使用自己的 Git 认证，不在 URL 中嵌入 token。
 
 若远端已有独立历史，先 fetch 和比较，再按团队方式合并；不默认 force push。本项目尚未选择开源许可证，在对外开源发布前由维护者确定许可。
 

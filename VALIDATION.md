@@ -1,5 +1,18 @@
 # 初版验证记录
 
+## 2026-11-10：Repo 引入契约增强
+
+- Python 回归：68 项通过，其中新增 entrypoint/报告相关 20 项。包含入口单独启动、cron、准备后启动、冻结源、v2 常驻 MCP 复用、普通网页对话不注入入口、错误报告/blocked、额外产物归档、超时/取消及报告 HTTP 接口。
+- Playwright Chrome：4 项全部通过，使用独立服务和 fake CLI；确认普通网页对话保持原有交互和资源行为。
+- 文档链接、代码块、Python 编译、全项目 AGENTS/entrypoint/skill 路径检查通过。
+- 真实 dsh：run_id `5cb3510b1aa949a2a26e02d996ae5c65`，使用隔离状态目录和新建 hello 示例 Git repo；未传 task，实际 prompt 顺序为 AGENTS → entrypoint → 基座报告契约，没有附加旧 task.default。原生记录包含 5 次工具调用，生成真实业务报告，冻结检查脚本通过；Run 为 succeeded / checks_passed，Agent 最终 JSON 状态为 completed，归档 1 个真实产物。
+
+真实执行收据：`.agent-base/validations/entrypoint-1794277460092584000/result.json`。基座 report.json 位于该隔离目录内的 `state/runs/5cb3510b1aa949a2a26e02d996ae5c65/`。运行记录不提交到 Git。
+
+后续收尾已启动新版 serve，网页与报告接口均返回 HTTP 200，列表包含 Admin 和三个 Repo Agent，三个常驻资源服务均存活。启动前无活动 Run 或消息，旧验收 cron 保持暂停；没有新增周期任务或修改/验证 CodeAgent 内网运行。新契约格式与兼容规则见 [RepoContract.md](RepoContract.md)。
+
+---
+
 记录日期：2026-11-05。平台：macOS，Python 3.13.14，Node.js v26.4.0，dsh npm 0.2.1-rc.5。
 
 ## 自动验证

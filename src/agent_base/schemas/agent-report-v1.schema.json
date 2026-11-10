@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Base unattended agent report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "summary", "artifacts", "checks", "issues", "next_steps"],
+  "properties": {
+    "schema_version": {"const": 1, "type": "integer"},
+    "status": {"enum": ["completed", "partial", "blocked", "failed"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "artifacts": {
+      "type": "array", "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^artifacts/"},
+          "description": {"type": "string", "maxLength": 4096}
+        }
+      }
+    },
+    "checks": {
+      "type": "array", "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 512},
+          "status": {"enum": ["passed", "failed", "not_run"]},
+          "details": {"type": "string", "maxLength": 4096}
+        }
+      }
+    },
+    "issues": {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 4096}},
+    "next_steps": {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 4096}}
+  }
+}
