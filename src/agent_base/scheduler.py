@@ -69,6 +69,8 @@ class Scheduler:
         self.store = self.service.store
         self.stop_event = threading.Event()
         self.last_service_check = 0
+        self.last_tick_at = None
+        self.last_error_at = None
 
     def register(self, name: str, repo: str, *, task=None, ref=None, model=None, effort=None,
                  workspace_source=None, timeout_seconds=1800, cron=None, timezone="Asia/Shanghai",
@@ -242,6 +244,8 @@ class Scheduler:
         while not self.stop_event.is_set():
             try:
                 self.tick()
+                self.last_tick_at = time.time()
             except Exception:
+                self.last_error_at = time.time()
                 logging.exception("scheduler tick failed; durable queue retained")
             self.stop_event.wait(0.5)

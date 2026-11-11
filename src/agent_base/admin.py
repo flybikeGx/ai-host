@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import Config, PROJECT
 from .engines import dsh_command, dsh_patch, parse_dsh_output, runtime_environment
-from .processes import Cancelled, run_process
+from .processes import Cancelled, run_process, identity
 from .store import Store
 
 
@@ -65,11 +65,16 @@ class Admin:
             task.write_text((PROJECT / "AGENTS.md").read_text(encoding="utf-8") + "\n\n用户本轮请求：\n" + text, encoding="utf-8")
             stopped = [False]
             old = signal.signal(signal.SIGINT, lambda *_: stopped.__setitem__(0, True))
+            def record_process(pid, birth):
+                file = turn_root / 'process.json.tmp'
+                file.write_text(json.dumps({'pid': pid, 'birth': birth, 'started_at': time.time(),
+                                            'supervisor_pid': os.getpid(), 'supervisor_birth': identity(os.getpid())}), encoding='utf-8')
+                file.replace(self.root / 'process.json')
             try:
                 code = run_process(dsh_command(self.config.runtime, patch, session_id=previous), cwd=self.workspace,
                     env=runtime_environment(self.config.runtime, self.root / "dsh-home"),
                     input_file=task, output=turn_root / "runtime.jsonl", error=turn_root / "runtime.stderr.log",
-                    deadline=time.time() + self.config.runtime.get("timeout_seconds", 1800), cancelled=lambda: stopped[0])
+                    deadline=time.time() + self.config.runtime.get("timeout_seconds", 1800), cancelled=lambda: stopped[0], on_started=record_process)
                 # Persist any established native identity even if the activity
                 # failed after submitting a task; later chat must not forget it.
                 for line in (turn_root / "runtime.jsonl").read_text(encoding="utf-8").splitlines():
@@ -85,6 +90,7 @@ class Admin:
                 self.store.save_chat_id(self.name, result["session_id"])
                 return result["text"]
             finally:
+                (self.root / 'process.json').unlink(missing_ok=True)
                 signal.signal(signal.SIGINT, old)
 
     def chat(self):

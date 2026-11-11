@@ -70,6 +70,7 @@ class Store:
                     turn_id TEXT NOT NULL, at REAL NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS conversation_events_cursor ON conversation_events(conversation_id,seq);
+                CREATE INDEX IF NOT EXISTS conversation_turns_run ON conversation_turns(run_id);
             """)
             columns = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
             for name, kind in (("executor_started", "INTEGER DEFAULT 0"), ("process_pid", "INTEGER"), ("process_birth", "REAL"),

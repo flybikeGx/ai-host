@@ -89,21 +89,27 @@ def create_app(config, *, background=True):
     conversations = Conversations(config)
     from .schedules import Schedules
     schedules = Schedules(scheduler)
+    from .dashboard import Dashboard
+    dashboard = Dashboard(config, scheduler)
     token = os.environ.get("AGENT_BASE_WEB_TOKEN")
 
     @asynccontextmanager
     async def lifespan(app):
         thread = threading.Thread(target=scheduler.run, name="agent-scheduler", daemon=True)
+        dashboard.scheduler_thread = thread if background else None
         if background:
             thread.start()
+            dashboard.start()
         yield
         scheduler.stop_event.set()
+        dashboard.stop()
         if background:
             thread.join(timeout=5)
         # Detached run supervisors continue; restarting HTTP does not replay them.
 
     app = FastAPI(title="Agent Base", lifespan=lifespan)
     app.state.scheduler = scheduler
+    app.state.dashboard = dashboard
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -133,6 +139,7 @@ def create_app(config, *, background=True):
 
     @app.get("/chat", response_class=HTMLResponse)
     @app.get("/cron", response_class=HTMLResponse)
+    @app.get("/dashboard", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
@@ -141,6 +148,10 @@ def create_app(config, *, background=True):
     @app.get("/api/chat/targets", dependencies=api)
     def chat_targets():
         return conversations.targets()
+
+    @app.get("/api/dashboard", dependencies=api)
+    def dashboard_snapshot():
+        return dashboard.snapshot()
 
     @app.get("/api/conversations", dependencies=api)
     def chat_list(archived: bool = False):

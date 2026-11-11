@@ -6,6 +6,8 @@
 
 同日界面补充：[图形化定时任务](SchedulingUI.md) 支持真正的一次性 run_at 计划和每天/每周配置；对话统一从 AGENTS 列表发起，历史可按 Agent 筛选。
 
+2026-11-11 补充：[运行仪表盘](Dashboard.md) 已实现 MCP 健康、Agent 活动实例、整机/受管进程 CPU 与内存、有限趋势、队列/调度心跳和最近异常；92 项 Python、12 项浏览器回归通过。指标由只读后台采样取得，不触发任务或模型调用。
+
 本文描述**已经实现的系统**；未实现项集中列在文末 TODO。入口文档见 [README](README.md)，安装步骤见 [Installation.md](Installation.md)，内网切换见 [CodeAgent 迁移指南](CODEAGENT_MIGRATION.md)。
 
 ## 1. 项目目标与运行方式
@@ -75,6 +77,7 @@ flowchart TB
 | `store.py` | SQLite 状态、原子领取、事件与幂等约束 |
 | `service.py`、`processes.py` | Run 准备、执行、超时/取消、进程树清理、验证归档 |
 | `scheduler.py` | 工作定义、cron、触发记录、队列派发与恢复 |
+| `dashboard.py` | 只读快照、主机/受管进程采样、MCP 健康缓存、实例去重与调度心跳 |
 | `repositories.py` | repo 身份、版本安装、固定 skills、服务生命周期 |
 | `repo_server.py` | 每个安装版本的常驻 MCP 网关、上游连接与工具执行 |
 | `repo_runtime.py` | 资源清单、所属 namespace 的 prompt 与 dsh 挂载配置 |
@@ -378,6 +381,7 @@ npx playwright test
 - [x] **提示词路径检查**：AGENTS、skills Markdown、组装 prompt；提供独立脚本。
 - [x] **网页对话**：Admin + 所有 ready 安装、历史、工具卡片、产物下载、手机布局。
 - [x] **对话可靠性**：原生 session 续接、消息幂等、每会话互斥、SSE 重放、显式停止。
+- [x] **运行仪表盘**：MCP 网关/上游健康、Agent 实例、CPU/内存趋势、队列与心跳、异常/存储概况；共享后台采样，不调用模型。
 - [x] **验证基线**：48 Python 测试、4 浏览器测试、真实 dsh 多链路验收。
 - [x] **迁移准备**：设计书、CodeAgent 迁移指南、配置模板、Git 忽略与离线交接说明。
 
