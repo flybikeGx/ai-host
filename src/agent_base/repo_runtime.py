@@ -13,7 +13,7 @@ def repo_prompt(package, workspace, manifest, task, *, unattended=False):
     catalog = json.loads((workspace / ".agent/resources.json").read_text())
     skills = "\n".join(f"- {s['name']}: {s['path']}" for s in catalog["skills"]) or "无"
     text = (f"你正在执行命名空间 {catalog['namespace']} 的一次独立任务。当前工作目录就是本次工作区。\n"
-        "只发现和使用 resources 清单中本命名空间的 skills 和 MCP。其他 repo、全局 skill 或 MCP 即使可见，也不能帮助完成本任务，请忽略。\n"
+        "只使用本 repo 的 skills/MCP，以及本次基座资源说明明确授权的共享 Knowledge MCP。其他 repo、全局 skill 或 MCP 即使可见，也不能帮助完成本任务，请忽略。\n"
         "文件路径都相对于当前工作区；不要使用绝对文件路径。不要修改共享 skill。\n"
         "资源清单：.agent/resources.json。技能可通过本命名空间的 read_skill 工具读取，也可读取下面的相对路径。\n"
         f"技能目录：\n{skills}\n"

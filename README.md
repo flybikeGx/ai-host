@@ -6,6 +6,10 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
 
+网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[项目知识库](Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
+
+知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](Knowledge.md)。
+
 Repo 引入：[本地 Agent 导出指南](export-guild.md) · [entrypoint 与结构化结果契约](RepoContract.md)。
 
 搁置设计：[用户隔离草案](USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
@@ -44,7 +48,7 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 
 启动 `.venv/bin/agent-base serve` 后打开 <http://127.0.0.1:8765/chat>，可以与 Admin Agent 和所有已安装 repo Agent 多轮对话。支持历史、实时文本与工具卡片、断线恢复、停止回复、模型/推理强度选择以及会话产物下载；repo 沿用固定 skills 和常驻 MCP。
 
-会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原调度页面仍在首页。设计参考、接口和测试见 [WebChat.md](WebChat.md)。
+会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原工作台保留在 `/workbench`。设计参考、接口和测试见 [WebChat.md](WebChat.md)。
 
 ## Repo 长期安装与资源命名空间
 
@@ -60,7 +64,7 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 .venv/bin/agent-base serve --port 8765
 ```
 
-本机页面：<http://127.0.0.1:8765>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。
+本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。
 
 ## 本地示例
 

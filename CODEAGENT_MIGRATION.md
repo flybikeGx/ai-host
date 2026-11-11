@@ -256,3 +256,10 @@ Windows 特别测试 `.cmd/.bat` 包装器、带空格路径、UTF-8 stdin、Ctr
 上线前保留外网 dsh 基线提交与独立实例。迁移失败时停止接收新 CodeAgent 任务，确认活动执行的状态和副作用；恢复基线配置并使用原 dsh 状态目录。不要把未知结果任务或用户消息自动转发到另一个引擎重跑。
 
 Git 回退可以恢复代码，不能撤销已经发生的外部工具副作用。跨引擎会话不做透明转换；必要时由用户提供任务摘要创建新会话，并明确它没有原生历史。
+## 知识库与新版页面补充
+
+项目知识数据和集中式 Knowledge MCP 由 Python 服务管理，不依赖 dsh 的 session 格式；迁移时无需把知识嵌入 CodeAgent 的上下文历史。CodeAgent 适配器仍需验证第二个 Streamable HTTP MCP 挂载、有限范围凭证的环境引用、六个知识工具发现与章节分页。当前自动挂载只在 dsh 路径实现，不能假定切换 engine 后知识能力已经就绪。
+
+管理员 Token 不得进入模型环境，Agent 仍只读/投稿；审批继续由网页管理 API 完成。知识数据库位于状态目录的 `knowledge/knowledge.sqlite`，应独立备份和迁移；Git bundle 只包含源码。完整契约见 [Knowledge.md](Knowledge.md)。
+
+新版主页 `/` 跳转到 `/dashboard`，知识库 `/knowledge`，原工作台 `/workbench`；现有 `/chat` 和 `/cron` 不变。

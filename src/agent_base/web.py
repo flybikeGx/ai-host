@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -91,6 +91,8 @@ def create_app(config, *, background=True):
     schedules = Schedules(scheduler)
     from .dashboard import Dashboard
     dashboard = Dashboard(config, scheduler)
+    from .knowledge_service import KnowledgeService
+    knowledge_service = KnowledgeService(config)
     token = os.environ.get("AGENT_BASE_WEB_TOKEN")
 
     @asynccontextmanager
@@ -98,6 +100,11 @@ def create_app(config, *, background=True):
         thread = threading.Thread(target=scheduler.run, name="agent-scheduler", daemon=True)
         dashboard.scheduler_thread = thread if background else None
         if background:
+            try:
+                await asyncio.to_thread(knowledge_service.ensure)
+            except ValueError:
+                import logging
+                logging.exception('Knowledge MCP unavailable; management UI remains accessible')
             thread.start()
             dashboard.start()
         yield
@@ -110,6 +117,8 @@ def create_app(config, *, background=True):
     app = FastAPI(title="Agent Base", lifespan=lifespan)
     app.state.scheduler = scheduler
     app.state.dashboard = dashboard
+    from .knowledge_web import register as register_knowledge
+    register_knowledge(app, config)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -140,6 +149,7 @@ def create_app(config, *, background=True):
     @app.get("/chat", response_class=HTMLResponse)
     @app.get("/cron", response_class=HTMLResponse)
     @app.get("/dashboard", response_class=HTMLResponse)
+    @app.get("/knowledge", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
@@ -236,7 +246,11 @@ def create_app(config, *, background=True):
         item = repositories.get(installation_id)
         return {**item, "health": repositories.health(item)}
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.get("/")
+    def home():
+        return RedirectResponse('/dashboard', status_code=307)
+
+    @app.get("/workbench", response_class=HTMLResponse)
     def index():
         return HTML
 
@@ -326,7 +340,7 @@ body{font:16px system-ui;margin:40px auto;max-width:1080px;padding:0 20px;backgr
 article{background:white;padding:20px;border-radius:12px;margin:18px 0}button,input,textarea{font:inherit;padding:8px;margin:4px}
 textarea{width:94%;height:110px}pre{white-space:pre-wrap;overflow-wrap:anywhere}table{width:100%;text-align:left;border-collapse:collapse}
 td,th{padding:9px;border-bottom:1px solid #ddd}button{cursor:pointer}small{color:#516078}</style>
-<h1>Agent Base</h1><p><a href="/chat">打开 Agent 对话台 →</a></p><p>触发工作，查看执行状态和产物。页面每两秒刷新。</p>
+<h1>Agent Base</h1><p><a href="/dashboard">返回主页</a> · <a href="/chat">Agent 对话</a> · <a href="/knowledge">知识库</a> · <a href="/cron">定时任务</a></p><p>触发工作，查看执行状态和产物。页面每两秒刷新。</p>
 <label>管理 Token（如已配置）<input type="password" id="token" autocomplete="off"></label>
 <article><h2>Repo 资源</h2><div id="repos"></div></article>
 <article><h2>工作</h2><div id="works"></div><h3>本次参数（JSON）</h3><textarea id="payload">{}</textarea></article>

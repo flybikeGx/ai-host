@@ -17,7 +17,11 @@ def config(tmp_path):
     file.write_text('[storage]\nroot="data"\n[queue]\nmax_concurrent=2\n[runtime]\nengine="dsh"\ncommand='
                     + json.dumps([sys.executable, str(fake)])
                     + '\nmodel="fixture-model"\neffort="high"\ntimeout_seconds=15\n')
-    return Config.load(file)
+    configuration = Config.load(file)
+    yield configuration
+    from agent_base.knowledge_service import KnowledgeService
+    if (configuration.data / 'knowledge/service.json').exists():
+        KnowledgeService(configuration).stop()
 
 
 @pytest.fixture

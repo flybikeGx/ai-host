@@ -62,7 +62,11 @@ class Admin:
             turn_root.mkdir()
             patch = dsh_patch(self.config.runtime, turn_root, admin_config=self.config.path)
             task = turn_root / "prompt.txt"
-            task.write_text((PROJECT / "AGENTS.md").read_text(encoding="utf-8") + "\n\n用户本轮请求：\n" + text, encoding="utf-8")
+            env = runtime_environment(self.config.runtime, self.root / "dsh-home")
+            deadline = time.time() + self.config.runtime.get("timeout_seconds", 1800)
+            from .knowledge_service import attach
+            instructions = attach(self.config, patch, env, 'admin', {'admin_session': self.name, 'turn_id': turn_root.name}, deadline, self.workspace)
+            task.write_text(instructions + (PROJECT / "AGENTS.md").read_text(encoding="utf-8") + "\n\n用户本轮请求：\n" + text, encoding="utf-8")
             stopped = [False]
             old = signal.signal(signal.SIGINT, lambda *_: stopped.__setitem__(0, True))
             def record_process(pid, birth):
@@ -72,9 +76,9 @@ class Admin:
                 file.replace(self.root / 'process.json')
             try:
                 code = run_process(dsh_command(self.config.runtime, patch, session_id=previous), cwd=self.workspace,
-                    env=runtime_environment(self.config.runtime, self.root / "dsh-home"),
+                    env=env,
                     input_file=task, output=turn_root / "runtime.jsonl", error=turn_root / "runtime.stderr.log",
-                    deadline=time.time() + self.config.runtime.get("timeout_seconds", 1800), cancelled=lambda: stopped[0], on_started=record_process)
+                    deadline=deadline, cancelled=lambda: stopped[0], on_started=record_process)
                 # Persist any established native identity even if the activity
                 # failed after submitting a task; later chat must not forget it.
                 for line in (turn_root / "runtime.jsonl").read_text(encoding="utf-8").splitlines():

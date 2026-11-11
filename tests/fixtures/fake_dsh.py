@@ -26,6 +26,35 @@ if "FIXTURE_STREAM" in text:
 if "FIXTURE_FAIL" in text:
     print("fixture runtime failure", file=sys.stderr)
     sys.exit(9)
+if 'FIXTURE_KNOWLEDGE' in text:
+    import asyncio
+    import httpx
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+    knowledge_config=next(plugin['config'] for row in patch for plugin in row.get('insert',[]) if plugin['id']=='knowledge')
+    async def exercise_knowledge():
+        async with httpx.AsyncClient(headers={'Authorization':os.environ['AGENT_BASE_KNOWLEDGE_AUTH']},trust_env=False) as client:
+            async with streamable_http_client(knowledge_config['url'],http_client=client) as streams:
+                async with ClientSession(streams[0],streams[1]) as session:
+                    await session.initialize()
+                    async def invoke(name,arguments):
+                        call_id=uuid.uuid4().hex
+                        print(json.dumps({'type':'tool_call','callId':call_id,'tool':'mcp__knowledge__'+name,'input':arguments}),flush=True)
+                        result=await session.call_tool(name,arguments)
+                        print(json.dumps({'type':'tool_result','callId':call_id,'status':'failed' if result.isError else 'completed','result':result.content[0].text}),flush=True)
+                        assert not result.isError,result
+                        return json.loads(result.content[0].text)
+                    catalog=await invoke('knowledge_catalog',{})
+                    namespace=catalog['namespaces'][0]['id']
+                    results=await invoke('knowledge_search',{'namespace':namespace,'query':'共享知识'})
+                    if 'FIXTURE_KNOWLEDGE_SUBMIT' in text:
+                        await invoke('knowledge_submit',{'namespace':namespace,'operation':'create','candidate':{'title':'共享知识贡献','summary':'经过审批后共享','body_markdown':'# 经验\n共享知识来自完整运行链路。'},'reason':'验证跨实例复用','idempotency_key':'fixture-'+session.__class__.__name__})
+                    if results['items']:
+                        doc=results['items'][0]
+                        outline=await invoke('knowledge_read',{'document_id':doc['id'],'version_id':doc['version_id'],'view':'outline'})
+                        await invoke('knowledge_read',{'document_id':doc['id'],'version_id':doc['version_id'],'view':'section','section_id':outline['sections'][0]['id']})
+                    Path('captured-knowledge.json').write_text(json.dumps({'hits':len(results['items']),'namespace':namespace,'control_secret_in_environment':'AGENT_BASE_WEB_TOKEN' in os.environ}))
+    asyncio.run(exercise_knowledge())
 if Path(".agent/resources.json").is_file() and "FIXTURE_NO_ARTIFACT" not in text:
     # Deterministic model stand-in, using the real persistent MCP protocol.
     import asyncio

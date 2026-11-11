@@ -22,6 +22,10 @@ def main():
     init.add_argument("--engine", choices=["dsh", "codeagent"], default="dsh")
     init.add_argument("--command")
     commands.add_parser("doctor", help="检查 CLI、凭据是否已配置及版本，不发模型请求")
+    opening = commands.add_parser("open", help="建立一次性本机管理连接并打开主页，不输出凭据")
+    opening.add_argument('--port', type=int, default=8765)
+    knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
+    knowledge.add_argument('knowledge_action', choices=['status','start','stop','restart'])
     lint = commands.add_parser("lint", help="检查 AGENTS.md 和 skill 文档中的绝对路径")
     lint.add_argument("paths", nargs="+", type=Path)
     repo = commands.add_parser("repo", help="管理 repo 长期安装、skills 和常驻 MCP")
@@ -95,6 +99,27 @@ def main():
             emit({"config": str(initialize(Path(args.config), engine=args.engine, command=args.command))})
             return
         config = Config.load(args.config)
+        if args.action == 'open':
+            import webbrowser
+            from .knowledge import Knowledge
+            from .knowledge_web import admin_secret
+            store = Knowledge(config)
+            admin_secret(store)
+            ticket = store.issue('bootstrap', {'actor':'local-admin'}, 120)
+            opened = webbrowser.open(f'http://127.0.0.1:{args.port}/knowledge#connect={ticket}')
+            emit({'opened': bool(opened), 'homepage': f'http://127.0.0.1:{args.port}/', 'connection': '一次性连接，有效期 120 秒，不输出凭据'})
+            return
+        if args.action == 'knowledge':
+            from .knowledge_service import KnowledgeService
+            service = KnowledgeService(config)
+            if args.knowledge_action in {'stop','restart'}:
+                result = service.stop()
+            if args.knowledge_action in {'start','restart'}:
+                result = service.ensure(explicit=True)
+            if args.knowledge_action == 'status':
+                result = service.status()
+            emit(result)
+            return
         if args.action == "_chat_execute":
             from .conversations import Conversations
             Conversations(config).execute(args.turn_id)
@@ -125,6 +150,12 @@ def main():
             from .scheduler import Scheduler
             scheduler = Scheduler(config)
             if args.action == "worker":
+                from .knowledge_service import KnowledgeService
+                try:
+                    KnowledgeService(config).ensure()
+                except ValueError:
+                    import logging
+                    logging.exception('Knowledge MCP unavailable')
                 if args.once:
                     emit(scheduler.tick())
                 else:

@@ -320,6 +320,9 @@ class Conversations:
                     prompt += "\n这是可继续追问的对话，使用本会话先前的消息。只处理本轮请求；普通问答无需重复执行默认任务或生成产物。\n"
                     patch = repo_patch(runtime, root, self.repositories, chat["target"], run_id, env)
                     self.store.update(run_id, status="running")
+                from .knowledge_service import attach
+                actor = 'admin' if chat['target'] == 'admin' else 'repo:' + item['repo_id']
+                prompt = attach(self.config, patch, env, actor, {'turn_id': turn_id, 'run_id': run_id, 'installation_id': chat['target']}, deadline, workspace) + prompt
                 prompt_file = root / "prompt.txt"
                 prompt_file.write_text(prompt, encoding="utf-8")
                 output = root / "runtime.jsonl"

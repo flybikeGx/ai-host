@@ -20,6 +20,23 @@ class PatchDumper(yaml.SafeDumper):
     pass
 
 
+class PatchLoader(yaml.SafeLoader):
+    pass
+
+
+def load_environment(loader, node):
+    value = loader.construct_scalar(node)
+    if not value.startswith('process.env[') or not value.endswith(']'):
+        raise ValueError('仅允许环境变量引用的 patch 表达式')
+    name = json.loads(value[len('process.env['):-1])
+    if not isinstance(name, str):
+        raise ValueError('环境变量引用格式错误')
+    return JsEnvironment(name)
+
+
+PatchLoader.add_constructor('tag:yaml.org,2002:js', load_environment)
+
+
 PatchDumper.add_representer(JsEnvironment, lambda dumper, item: dumper.represent_scalar(
     "tag:yaml.org,2002:js", "process.env[" + json.dumps(item.name) + "]"))
 
@@ -98,7 +115,7 @@ def runtime_environment(runtime: dict, home: Path) -> dict:
     source = str(Path(__file__).resolve().parents[1])
     env["PYTHONPATH"] = source + os.pathsep + env.get("PYTHONPATH", "")
     for key in list(env):
-        if key.startswith(("CLAUDE_HUB_", "CODEAGENT_HUB_")) or key == "CODEAGENT3_LAUNCHER_PID":
+        if key.startswith(("CLAUDE_HUB_", "CODEAGENT_HUB_", "AGENT_BASE_KNOWLEDGE_")) or key in {"CODEAGENT3_LAUNCHER_PID", "AGENT_BASE_WEB_TOKEN"}:
             del env[key]
     if runtime.get("engine", "dsh") == "dsh":
         env.update(DSH_HOME=str(home), DSH_AGENTS_HOME=str(home / "agents"), DSH_TELEMETRY_DISABLED="1",

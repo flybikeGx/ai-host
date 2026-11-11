@@ -308,6 +308,10 @@ def test_workspace_disk_real_size_links_cache_and_limits(config,tmp_path):
     (root/'skill-link').symlink_to(external,target_is_directory=True)
     os.link(payload,root/'hard-link')
     sampler=WorkspaceSampler(config.data)
+    upcoming=config.data/'workspaces/upcoming'
+    assert sampler.collect([upcoming])[upcoming]['state']=='missing'
+    upcoming.mkdir();(upcoming/'new-template').write_bytes(b'a'*21)
+    assert sampler.collect([upcoming])[upcoming]['logical_bytes']==21
     size=sampler.collect([root])[root]
     assert size['complete'] and size['logical_bytes']==8229 and size['files']==2
     payload.write_bytes(b'x'*16384)

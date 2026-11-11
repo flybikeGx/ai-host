@@ -33,6 +33,18 @@ try:
                     "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "UI fixture"], check=True)
     repositories.install(str(repo))
     app = create_app(config)
+    from agent_base.knowledge import Knowledge
+    from fastapi.responses import JSONResponse
+    knowledge = Knowledge(config)
+    project = knowledge.save_namespace({'slug':'kb-ui-demo','name':'知识演示项目','description':'浏览器隔离验收'})
+    knowledge.bind('admin', {'primary_namespace_id':project['id'],'read_namespace_ids':[project['id']],'submit_namespace_ids':[project['id']]})
+    proposal = knowledge.submit(knowledge.binding('admin'), project['id'], 'create',
+        {'title':'待审批日切规则','summary':'Agent 贡献的规则','body_markdown':'# 日切\n每日北京时间零点结算。','tags':['规则']}, '从演示流程核对', 'ui-review')
+    @app.post('/fixture/knowledge-login')
+    def knowledge_login():
+        response = JSONResponse({'namespace':project['id'],'submission':proposal['id']})
+        response.set_cookie('kb_admin', knowledge.issue('admin',{'actor':'local-admin'},3600),httponly=True,samesite='strict',path='/api/knowledge')
+        return response
     @app.post("/fixture/fire/{name}")
     def fire_fixture_schedule(name: str):
         # Deterministic clock hook only in this fake-CLI test server, never in production.
@@ -43,5 +55,7 @@ try:
         return {"dispatched": app.state.scheduler.dispatch()}
     uvicorn.run(app, host="127.0.0.1", port=8879, log_level="warning")
 finally:
+    from agent_base.knowledge_service import KnowledgeService
+    KnowledgeService(config).stop()
     for item in repositories.list():
         repositories.stop(item["id"])

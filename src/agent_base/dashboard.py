@@ -254,6 +254,10 @@ class Dashboard:
 
         agents = {'admin': {'id': 'admin', 'name': 'Admin Agent', 'kind': 'admin', 'commit': None, 'installed': True}}
         roots = [{'pid': os.getpid(), 'birth': psutil.Process().create_time(), 'owner': '_service', 'category': 'service'}]
+        from .knowledge_service import KnowledgeService
+        core_status = KnowledgeService(self.config).status()
+        if pid_state(core_status.get('pid'), core_status.get('birth')) == 'alive':
+            roots.append({'pid': core_status['pid'], 'birth': core_status['birth'], 'owner': '_knowledge_core', 'category': 'mcp'})
         due = []
         for item in installations:
             item['manifest'] = json.loads(item['manifest'])
@@ -460,6 +464,8 @@ class Dashboard:
                          'disk': {'total_bytes': disk.total, 'used_bytes': disk.used, 'free_bytes': disk.free, 'percent': disk.percent}},
                 'managed': managed, 'agents': list(agents.values()), 'instances': instances, 'mcp': mcps, 'gateways': gateways,
                 'workspaces': workspace_list[:100], 'workspace_stats': workspace_stats,
+                'core_services': [{'id':'knowledge','name':'Knowledge MCP','state':core_status['state'], 'pid':core_status.get('pid'),
+                                   'resources':group_metrics.get('_knowledge_core'),'stats':core_status.get('stats',{})}],
                 'counts': {'installed_agents': len({i['repo_id'] for i in installations if i['status']=='ready'}),
                            'running_instances': sum(i['state']=='alive' for i in instances), 'unknown_instances': sum(i['state']=='unknown' for i in instances),
                            'queued_runs': counts.get('queued', 0), 'queued_turns': sum(t['status']=='queued' for t in turns),

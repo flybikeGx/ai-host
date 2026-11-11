@@ -283,6 +283,16 @@ class Service:
                     patch = repo_patch(runtime, root, repositories, spec["installation_id"], run_id, env)
                 else:
                     patch = dsh_patch(runtime, root, package=root / "package", workspace=workspace, manifest=manifest, python=python)
+                from .knowledge_service import attach
+                actor = 'repo:' + repositories.get(spec['installation_id'])['repo_id'] if spec.get('installation_id') else None
+                if actor:
+                    instructions = attach(self.config, patch, env, actor, {'run_id': run_id, 'installation_id': spec['installation_id']}, deadline, workspace)
+                    if instructions:
+                        prompt.write_text(instructions + prompt.read_text(encoding='utf-8'), encoding='utf-8')
+                        contract_file = root / 'prompt-contract.json'
+                        contract = json.loads(contract_file.read_text())
+                        contract['prompt_sha256'] = hashlib.sha256(prompt.read_bytes()).hexdigest()
+                        contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
                 args = dsh_command(runtime, patch)
             else:
                 if manifest.get("tools", {}).get("local") or manifest.get("mcp", {}).get("servers"):

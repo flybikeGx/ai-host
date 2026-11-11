@@ -127,7 +127,8 @@ class WorkspaceSampler:
         allowed = set(paths)
         self.cache = {p: value for p, value in self.cache.items() if p in allowed}
         now = time.time()
-        due = sorted((p for p in paths if p not in self.cache or now-self.cache[p]['checked_at'] >= self.ttl),
+        due = sorted((p for p in paths if p not in self.cache or now-self.cache[p]['checked_at'] >= self.ttl
+                      or (self.cache[p]['state']=='missing' and p.is_dir())),
                      key=lambda p: self.cache.get(p, {}).get('checked_at', 0))
         for path in due[:self.scans_per_tick]:
             self.cache[path] = self.measure(path)
