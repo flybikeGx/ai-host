@@ -8,6 +8,8 @@
 
 2026-11-11 补充：[运行仪表盘](Dashboard.md) 已实现 MCP 健康、Agent 活动实例、整机/受管进程 CPU 与内存、有限趋势、队列/调度心跳和最近异常；92 项 Python、12 项浏览器回归通过。指标由只读后台采样取得，不触发任务或模型调用。
 
+同日统计口径修正：实例表只列活动 dsh 及其 CPU/RSS、工作区磁盘；MCP 按实际服务逐个采样，网关单列，不再按 Agent 汇总内存。保留工作区单独展示，支持 0/1/多个 MCP 的安装；回归更新为 96 项 Python、12 项浏览器测试通过。
+
 本文描述**已经实现的系统**；未实现项集中列在文末 TODO。入口文档见 [README](README.md)，安装步骤见 [Installation.md](Installation.md)，内网切换见 [CodeAgent 迁移指南](CODEAGENT_MIGRATION.md)。
 
 ## 1. 项目目标与运行方式
@@ -78,6 +80,7 @@ flowchart TB
 | `service.py`、`processes.py` | Run 准备、执行、超时/取消、进程树清理、验证归档 |
 | `scheduler.py` | 工作定义、cron、触发记录、队列派发与恢复 |
 | `dashboard.py` | 只读快照、主机/受管进程采样、MCP 健康缓存、实例去重与调度心跳 |
+| `resource_metrics.py` | stdio MCP 进程身份归属、旧网关兼容、工作区有界磁盘扫描与缓存 |
 | `repositories.py` | repo 身份、版本安装、固定 skills、服务生命周期 |
 | `repo_server.py` | 每个安装版本的常驻 MCP 网关、上游连接与工具执行 |
 | `repo_runtime.py` | 资源清单、所属 namespace 的 prompt 与 dsh 挂载配置 |

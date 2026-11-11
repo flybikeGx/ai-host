@@ -8,9 +8,11 @@ test('dashboard shows live MCP and resources without creating runs',async({page,
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByTestId('running-instances')).toHaveText('0');
   await expect(page.getByTestId('healthy-mcp')).toHaveText('1');
-  await expect(page.locator('.dash-table')).toContainText('finance-agent');
-  await expect(page.locator('.dash-mcp')).toContainText('domain');
-  await expect(page.locator('.dash-mcp .dash-status')).toHaveText('健康');
+  await expect(page.getByText('暂无运行中的 dsh 实例。已安装的模板和常驻 MCP 单独统计。')).toBeVisible();
+  await expect(page.locator('.dash-mcp-table')).toContainText('finance-agent');
+  await expect(page.locator('.dash-mcp-table')).toContainText('domain');
+  await expect(page.locator('.dash-mcp-table .dash-status')).toHaveText('可用');
+  await expect(page.locator('.dash-mcp-table')).toContainText('PID');
   await page.getByRole('button',{name:'内存',exact:true}).click();
   await expect(page.getByRole('img',{name:'整机内存使用率历史趋势'})).toBeVisible();
   await page.getByRole('button',{name:'暂停自动刷新'}).click();
@@ -34,13 +36,20 @@ test('dashboard counts a running conversation once and survives navigation',asyn
   await expect(page.getByRole('button',{name:'停止回复',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'仪表盘',exact:true}).click();
   await expect(page.getByTestId('running-instances')).toHaveText('1',{timeout:10000});
-  await expect(page.locator('.dash-table tbody tr').filter({hasText:'finance-agent'})).toContainText('1');
+  await expect(page.locator('.dash-instance-table tbody tr')).toHaveCount(1);
+  await expect(page.locator('.dash-instance-table')).toContainText('finance-agent');
+  await expect(page.locator('.dash-instance-table [data-testid=workspace-size]')).toBeVisible();
+  await expect(page.locator('.dash-instance-table')).toContainText('文件');
   await page.getByRole('button',{name:'对话',exact:true}).click();
   await expect(page.getByRole('button',{name:'停止回复',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'停止回复',exact:true}).click();
   await expect(page.getByText('已停止',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'仪表盘',exact:true}).click();
   await expect(page.getByTestId('running-instances')).toHaveText('0',{timeout:10000});
+  await expect(page.locator('.dash-instance-table')).toHaveCount(0);
+  await page.getByText('查看运行中及保留的工作区',{exact:true}).click();
+  await expect(page.locator('.dash-workspaces')).toContainText('finance-agent');
+  await expect(page.locator('.dash-workspaces')).toContainText('保留目录');
 });
 
 test('dashboard mobile and authenticated navigation',async({page})=>{

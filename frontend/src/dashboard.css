@@ -72,6 +72,10 @@
 .dash-resource-cell>strong{font-size:11px;font-weight:500;color:#8298ba;white-space:nowrap}
 .dash-resource-cell small{display:block;font-size:9px;color:#adb9ce;line-height:1.8;white-space:nowrap;margin-top:4px}
 .dash-muted{color:#b0bbcd;font-size:10px}
+.dash-gateways,.dash-workspaces{margin-top:18px;border-top:1px solid #edf1f7;padding-top:14px}
+.dash-gateways summary,.dash-workspaces summary{font-size:11px;color:#879bbc;cursor:pointer;line-height:1.8}
+.dash-gateways .dash-mcp-list,.dash-workspaces .dash-table-wrap{margin-top:16px}
+.dash-workspace-label{max-width:300px;overflow-wrap:anywhere;white-space:normal!important;line-height:1.7}
 .dash-mcp-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .dash-mcp{padding:16px 16px 0;border:1px solid #e5ebf5;border-radius:9px;min-width:0;background:#fdfdff}
 .dash-mcp-head{display:flex;align-items:center;gap:9px}

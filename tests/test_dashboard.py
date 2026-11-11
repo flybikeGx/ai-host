@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 import agent_base.dashboard as module
 from agent_base.conversations import Conversations
 from agent_base.dashboard import Dashboard,ProcessSampler,pid_state
+from agent_base.resource_metrics import WorkspaceSampler
 from agent_base.scheduler import Scheduler
 from agent_base.web import create_app
 
@@ -51,18 +52,18 @@ def test_shared_mcp_health_and_process_status_without_restarts(config,repositori
     monkeypatch.setattr(repositories.__class__,'ensure_service',forbidden)
     dashboard.sample()
     value=dashboard.snapshot()
-    assert value['mcp'][0]['state']=='healthy'
+    assert value['gateways'][0]['state']=='healthy'
     assert value['counts']['healthy_mcp']==1
     assert value['counts']['declared_mcp']==1
     assert value['counts']['running_instances']==0  # An idle MCP is not an Agent invocation.
     assert repositories.health(repositories.get(item['id']))['boot_id']==before
     repositories.stop(item['id'])
     dashboard.sample()
-    assert dashboard.snapshot()['mcp'][0]['state']=='disabled'
+    assert dashboard.snapshot()['gateways'][0]['state']=='disabled'
     repositories.update(item['id'],enabled=1)
     dashboard.sample()
     value=dashboard.snapshot()
-    assert value['mcp'][0]['state']=='down' and value['counts']['healthy_mcp']==0
+    assert value['gateways'][0]['state']=='down' and value['counts']['healthy_mcp']==0
     assert any(a['kind']=='mcp' for a in value['alerts'])
     assert repositories.get(item['id'])['pid']==item['pid']
 
@@ -79,8 +80,8 @@ def test_live_but_unhealthy_mcp_and_cache(config,repositories,resource_repos,mon
     data=dashboard.snapshot()
     assert len(calls)==1
     assert data['mcp'][0]['process_state']=='alive'
-    assert data['mcp'][0]['state']=='unhealthy'
-    assert data['mcp'][0]['upstreams'][0]['state']=='unavailable'
+    assert data['gateways'][0]['state']=='unhealthy'
+    assert data['mcp'][0]['state']=='unavailable'
     assert data['counts']['healthy_mcp']==0
 
 
@@ -107,7 +108,12 @@ def test_repo_conversation_is_one_instance_not_two(config,repositories,resource_
         agent=next(a for a in data['agents'] if a['id']==item['id'])
         assert agent['running_instances']==1 and agent['conversations']==1
         mcp=data['mcp'][0]
-        assert agent['resources']['rss_bytes']>mcp['resources']['rss_bytes']
+        assert 'resources' not in agent
+        assert mcp['pid']!=data['instances'][0]['pid']
+        assert data['instances'][0]['resources']['process_count']==1
+        assert data['instances'][0]['workspace']['size']['logical_bytes']>0
+        assert data['instances'][0]['workspace']['active']
+        assert data['managed']['rss_bytes']>sum(r['resources']['rss_bytes'] for r in [mcp,data['instances'][0],data['gateways'][0]])
         assert not data['last_24h']
     finally:
         chats.cancel(chat['id'])
@@ -245,3 +251,84 @@ def test_direct_admin_cli_is_observed_and_clears_metadata(config):
         if child.poll() is None:
             child.send_signal(signal.SIGINT)
             child.communicate(timeout=15)
+
+
+def test_zero_one_two_mcps_are_individual_processes(config,repositories,resource_repos):
+    import yaml
+    installed=[]
+    for count,(name,repo) in enumerate(resource_repos.items()):
+        file=repo/'Installation.md'
+        text=file.read_text()
+        before,block=text.split('```agent-base-install\n')
+        configuration,after=block.split('```',1)
+        manifest=yaml.safe_load(configuration)
+        server=manifest['mcp']['servers'][0]
+        # Identical commands still represent distinct actual processes. New
+        # gateway metadata must preserve their declaration identities.
+        manifest['mcp']['servers']=[{**server,'id':'service'+str(i)} for i in range(count)]
+        file.write_text(before+'```agent-base-install\n'+yaml.safe_dump(manifest,allow_unicode=True)+'```'+after)
+        subprocess.run(['git','-C',str(repo),'add','.'],check=True)
+        subprocess.run(['git','-C',str(repo),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','MCP counts'],check=True)
+        installed.append(repositories.install(str(repo)))
+    dashboard=Dashboard(config,Scheduler(config));dashboard.sample()
+    data=dashboard.snapshot()
+    assert data['counts']['declared_mcp']==3
+    assert sorted(g['mcp_count'] for g in data['gateways'])==[0,1,2]
+    assert data['counts']['running_instances']==0 and not data['instances']
+    assert len({m['pid'] for m in data['mcp']})==3
+    assert all(m['pid'] and m['metrics_state']=='measured' and m['resources']['process_count']==1 for m in data['mcp'])
+    assert all(g['resources']['process_count']==1 for g in data['gateways'])
+    assert all('resources' not in a for a in data['agents'])
+    # Old gateway compatibility: one exact command is attributable; two
+    # identical commands must remain unknown instead of splitting their RSS.
+    from agent_base.resource_metrics import mcp_processes
+    one,two=installed[1:]
+    assert len(mcp_processes(one,{}))==1
+    assert mcp_processes(two,{})=={}
+    data_pid=data['mcp'][0]['pid']
+    assert mcp_processes(two,{'service0':{'pid':data_pid,'birth':0}})=={}
+
+
+def test_remote_mcp_does_not_inherit_gateway_memory(config,repositories,resource_repos):
+    item=repositories.install(str(resource_repos['finance']))
+    manifest=copy.deepcopy(item['manifest'])
+    manifest['mcp']['servers']=[{'id':'domain','transport':'streamable_http','url':'https://example.invalid/mcp'}]
+    with repositories.store.connection() as conn:
+        conn.execute('UPDATE repo_installations SET manifest=? WHERE id=?',(json.dumps(manifest),item['id']))
+    dashboard=Dashboard(config,Scheduler(config));dashboard.sample()
+    mcp=dashboard.snapshot()['mcp'][0]
+    assert mcp['metrics_state']=='remote' and mcp['resources'] is None and mcp['pid'] is None
+
+
+def test_workspace_disk_real_size_links_cache_and_limits(config,tmp_path):
+    root=config.data/'workspaces/fixture/repo';root.mkdir(parents=True)
+    payload=root/'template.bin';payload.write_bytes(b'x'*8192)
+    nested=root/'input';nested.mkdir();(nested/'input.txt').write_bytes(b'y'*37)
+    external=tmp_path/'shared-skill';external.mkdir();(external/'SKILL.md').write_bytes(b'z'*5000)
+    (root/'skill-link').symlink_to(external,target_is_directory=True)
+    os.link(payload,root/'hard-link')
+    sampler=WorkspaceSampler(config.data)
+    size=sampler.collect([root])[root]
+    assert size['complete'] and size['logical_bytes']==8229 and size['files']==2
+    payload.write_bytes(b'x'*16384)
+    assert sampler.collect([root])[root]['logical_bytes']==8229
+    sampler.ttl=0
+    assert sampler.collect([root])[root]['logical_bytes']==16421
+    assert sampler.measure(external)['state']=='outside'
+    sampler.max_entries=1
+    assert sampler.measure(root)['state']=='partial'
+    assert not sampler.measure(root)['complete']
+
+
+def test_preparation_verification_and_retained_workspace_are_not_instances(config,repo):
+    scheduler=Scheduler(config)
+    for status in ('preparing','verifying','failed'):
+        job=scheduler.store.create({'repo':str(repo),'runtime':config.runtime})
+        workspace=Path(job['root'])/'repo';workspace.mkdir();(workspace/'copied-template').write_bytes(b'a'*123)
+        scheduler.store.update(job['id'],status=status,workspace=str(workspace),process_pid=os.getpid(),process_birth=psutil.Process().create_time())
+    dashboard=Dashboard(config,scheduler);dashboard.sample()
+    data=dashboard.snapshot()
+    assert data['counts']['running_instances']==0 and data['instances']==[]
+    assert data['workspace_stats']['count']==3 and data['workspace_stats']['logical_bytes']==369
+    assert all(not r['active'] for r in data['workspaces'])
+    assert not any(str(config.data) in json.dumps(row) for row in data['workspaces'])

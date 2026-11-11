@@ -31,6 +31,7 @@ from .config import Config
 from .package import expand, within
 from .processes import run_process
 from .repositories import Repositories
+from .resource_metrics import direct_children
 
 
 def env_values(values):
@@ -63,7 +64,7 @@ def application(config, item, endpoint):
     remote_tools = {}
     tools = []
     health = {"installation_id": item["id"], "namespace": item["namespace"], "pid": os.getpid(),
-              "boot_id": secrets.token_hex(8), "healthy": True, "upstreams": {}}
+              "boot_id": secrets.token_hex(8), "healthy": True, "upstreams": {}, "processes": {}}
 
     def run_context():
         request = server.request_context.request
@@ -169,9 +170,14 @@ def application(config, item, endpoint):
             for specification in manifest.get("mcp", {}).get("servers", []):
                 server_id = specification["id"]
                 if specification["transport"] == "stdio":
+                    before = direct_children(os.getpid())
                     argv = expand(specification["argv"], package, package, python)
                     connection = await stack.enter_async_context(stdio_client(StdioServerParameters(command=argv[0], args=argv[1:],
                         cwd=package, env={"PYTHONPATH": str(Path(__file__).resolve().parents[1]), **env_values(specification.get("environment", {}))})))
+                    created = direct_children(os.getpid()) - before
+                    if len(created) == 1:
+                        pid, birth = created.pop()
+                        health["processes"][server_id] = {"pid": pid, "birth": birth}
                 else:
                     client = await stack.enter_async_context(httpx.AsyncClient(headers=env_values(specification.get("headers", {})), timeout=30, trust_env=False))
                     connection = await stack.enter_async_context(streamable_http_client(specification["url"], http_client=client))
