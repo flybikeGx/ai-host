@@ -56,17 +56,72 @@ def environment_values(values: dict) -> dict:
     return result
 
 
+def pi_ai_profile(definition: dict) -> dict:
+    """Map a validated provider definition onto the pi-ai adapter profile."""
+    profile = {"api": definition["api"], "baseURL": definition["base_url"]}
+    if definition.get("api_key_env"):
+        profile["apiKeyEnv"] = definition["api_key_env"]
+    if definition.get("display_name"):
+        profile["displayName"] = definition["display_name"]
+    if definition.get("default_context_window"):
+        profile["defaultContextWindow"] = definition["default_context_window"]
+    if definition.get("default_max_tokens"):
+        profile["defaultMaxTokens"] = definition["default_max_tokens"]
+    models = []
+    for entry in definition["models"]:
+        model = {"id": entry["id"]}
+        if entry.get("name"):
+            model["name"] = entry["name"]
+        if entry.get("context_window"):
+            model["contextWindow"] = entry["context_window"]
+        if entry.get("max_tokens"):
+            model["maxTokens"] = entry["max_tokens"]
+        if entry.get("input"):
+            model["input"] = entry["input"]
+        if entry.get("reasoning_efforts") is not None:
+            model["reasoningEfforts"] = entry["reasoning_efforts"]
+        models.append(model)
+    profile["models"] = models
+    return profile
+
+
+def provider_credential_env(runtime: dict) -> str | None:
+    """Env var name carrying the selected provider's credential, if any."""
+    provider = runtime.get("provider", "deepseek-official")
+    definition = (runtime.get("providers") or {}).get(provider)
+    return definition.get("api_key_env") if definition else None
+
+
 def dsh_patch(runtime: dict, root: Path, *, package: Path | None = None,
               workspace: Path | None = None, manifest: dict | None = None,
               python: str = sys.executable, admin_config: Path | None = None) -> Path:
+    providers = runtime.get("providers") or {}
+    selected = runtime.get("provider", "deepseek-official")
+    if selected in providers:
+        # Fail fast in the process that spawns the CLI; the same environment
+        # is what the adapter resolves the reference from.
+        credential_env = providers[selected].get("api_key_env")
+        if credential_env and not os.environ.get(credential_env):
+            raise ValueError(f"缺少 provider 凭据环境变量：{credential_env}（只设置环境变量，不写入配置）")
     rows = [{"id": "agent-default-model", "config": {
-        "provider": runtime.get("provider", "deepseek-official"), "model": runtime["model"],
+        "provider": selected, "model": runtime["model"],
         **({"reasoningEffort": runtime["effort"]} if runtime.get("effort") else {})}},
         {"id": "approval", "config": {"policy": runtime.get("approval_policy", "never")}}]
     inserts = []
+    if providers:
+        # The headless composition already mounts the pi-ai adapter dormant
+        # (dsh-base entry `llm-pi-ai`); configuring that entry registers the
+        # routes. Inserting a second instance would duplicate the catalog and
+        # fail with "configurable provider ... is already declared".
+        rows.append({"id": "llm-pi-ai", "config": {
+            "providers": {name: pi_ai_profile(definition) for name, definition in providers.items()}}})
     if admin_config:
         admin_env = {"PYTHONPATH": str(Path(__file__).resolve().parents[1])}
-        for name in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        credential_names = {"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+        credential_env = provider_credential_env(runtime)
+        if credential_env:
+            credential_names.add(credential_env)
+        for name in sorted(credential_names):
             if os.environ.get(name):
                 admin_env[name] = JsEnvironment(name)
         rows.append({"id": "agent-instructions", "config": {"maxBytes": 65536, "projectRootMarkers": [".agent-base-root"]}})

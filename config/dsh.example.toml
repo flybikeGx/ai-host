@@ -15,3 +15,5 @@ effort = "high"
 timeout_seconds = 1800
 permission_mode = "workspace-write"
 approval_policy = "never"
+
+# 内部网关或其他兼容端点：见 config/internal-gateway.example.toml 与 docs/Providers.md。

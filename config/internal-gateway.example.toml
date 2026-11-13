@@ -1,0 +1,47 @@
+# 内部 OpenAI 兼容网关示例。凭据只引用环境变量名，本文件不含任何密钥。
+# 详见 docs/CODEAGENT_MIGRATION.md 与 README。复制到项目根 agent-base.toml 后编辑：
+# - base_url 换成内部网关端点；api 按网关协议选 openai-completions / openai-responses / anthropic-messages。
+# - 模型目录按网关实际模型填写；runtime.model 必须是目录内 id。
+# - 启动前 export INTERNAL_GATEWAY_API_KEY=...，doctor 检查凭据是否就绪。
+[storage]
+root = ".agent-base-internal"
+
+[queue]
+max_concurrent = 2
+
+[runtime]
+engine = "dsh"
+command = ["dsh"]
+provider = "internal-gateway"
+model = "internal-flash"
+effort = "high"
+timeout_seconds = 1800
+permission_mode = "workspace-write"
+approval_policy = "never"
+
+[providers.internal-gateway]
+adapter = "pi-ai"
+api = "openai-completions"
+base_url = "https://llm.internal.example/v1"
+api_key_env = "INTERNAL_GATEWAY_API_KEY"
+display_name = "Internal Gateway"
+default_context_window = 131072
+default_max_tokens = 32768
+
+[[providers.internal-gateway.models]]
+id = "internal-flash"
+name = "Internal Flash"
+context_window = 131072
+max_tokens = 32768
+input = ["text"]
+
+[providers.internal-gateway.models.reasoning_efforts]
+high = "high"
+
+[[providers.internal-gateway.models]]
+id = "internal-lite"
+name = "Internal Lite"
+context_window = 65536
+input = ["text"]
+# 非推理模型显式声明 false，选择 effort 时会明确报错而不是静默忽略。
+reasoning_efforts = false

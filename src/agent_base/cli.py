@@ -21,7 +21,7 @@ def main():
     init = commands.add_parser("init", help="创建配置，保留已有配置")
     init.add_argument("--engine", choices=["dsh", "codeagent"], default="dsh")
     init.add_argument("--command")
-    commands.add_parser("doctor", help="检查 CLI、凭据是否已配置及版本，不发模型请求")
+    commands.add_parser("doctor", help="检查 CLI、当前 provider 与凭据状态及版本，不发模型请求")
     opening = commands.add_parser("open", help="建立一次性本机管理连接并打开主页，不输出凭据")
     opening.add_argument('--port', type=int, default=8765)
     knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
@@ -163,6 +163,7 @@ def main():
                 emit(scheduler.enable(args.name, args.work_action == "resume"))
             return
         if args.action == "doctor":
+            from .engines import provider_credential_env
             command = config.runtime["command"]
             found = Path(command[0]).is_file() or bool(shutil.which(command[0]))
             version = None
@@ -171,10 +172,18 @@ def main():
                 argv, env = platform_command([*command, "--version"], os.environ.copy())
                 result = subprocess.run(argv, capture_output=True, text=True, timeout=20, env=env)
                 version = result.stdout.strip() if result.returncode == 0 else None
+            provider = config.runtime.get("provider", "deepseek-official")
+            credential_env = provider_credential_env(config.runtime)
             emit({"engine": config.runtime.get("engine", "dsh"), "command_found": found, "cli_version": version,
-                  "deepseek_key_configured": bool(os.environ.get("DEEPSEEK_API_KEY")), "data": str(config.data),
-                  "max_concurrent": config.max_concurrent, "model": config.runtime.get("model"), "online_inference": "not_tested"})
+                  "provider": provider, "credential_env": credential_env,
+                  "credential_configured": bool(os.environ.get(credential_env)) if credential_env else None,
+                  "deepseek_key_configured": bool(os.environ.get("DEEPSEEK_API_KEY")),
+                  "data": str(config.data),
+                  "max_concurrent": config.max_concurrent, "model": config.runtime.get("model"),
+                  "online_inference": "not_tested"})
             if not found or not version:
+                raise SystemExit(1)
+            if credential_env and not os.environ.get(credential_env):
                 raise SystemExit(1)
             return
         if args.action == "admin":
