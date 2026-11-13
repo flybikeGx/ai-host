@@ -36,7 +36,7 @@
 ### 交付说明
 
 - 完成内容：上述 A/B/C 三个工作包及对应文档、示例配置与回归。
-- 自动检查：`uv run --frozen pytest -q` 等价的本机回归 151 项通过。
+- 自动检查：仓库根目录 `uv run --frozen pytest -q` 151 项通过（本次运行把 `UV_CACHE_DIR` 指向可写缓存目录，依赖与结果不变）。
 - 遗留限制：Windows 真机与真实内网网关未验收；pi-ai 的 `compat`、`modelOverrides`、图片预算等高级字段暂未开放；详细字段见 [Providers.md](Providers.md)。
 
 ## 2026-11-11：集中式项目知识库与统一主页
