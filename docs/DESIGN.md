@@ -327,7 +327,7 @@ Git 只发布源码、锁文件、静态前端、示例和审阅过的文档截�
 | CLI 安装 | 项目本地 `.runtime/dsh/`，Node.js 24.9+ |
 | 前端 | React、Vite；构建文件随 Python 项目提交 |
 | 状态存储 | 单机 SQLite + 文件系统，不依赖远程数据库 |
-| Windows | 有包装器和进程处理代码，尚未真机验收；浏览器测试启动脚本仍偏向 POSIX |
+| Windows | 有包装器、进程处理和目录链接 junction 回退代码，尚未真机验收；浏览器测试启动脚本仍偏向 POSIX |
 | CodeAgent | 基础 print 入口，完整任务资源和多轮对话尚待内网适配 |
 
 固定 dsh 发布版的 final 事件没有新的 reason 字段，当前以退出码、唯一 session/final 组合判断协议成功，记录 `legacy_final_exit_code`，不伪造 finish_reason。原生插件可能把某些加载失败视为 warning，因此安装收据不代替实际工具调用验收。
