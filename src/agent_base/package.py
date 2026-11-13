@@ -55,9 +55,6 @@ def load_package(root: Path) -> dict:
     manifest = yaml.safe_load(file.read_text(encoding="utf-8") if file.exists() else blocks[0]) if file.exists() or blocks else {"schema_version": 1}
     if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2}:
         raise ValueError("安装清单必须是 schema_version: 1 或 2 的对象")
-    if manifest["schema_version"] == 2:
-        from .path_lint import require_portable
-        require_portable(root)
     unknown = set(manifest) - {"schema_version", "package", "task", "environment", "installation", "tools", "mcp", "skills", "completion", "limits"}
     if unknown:
         raise ValueError(f"未知清单字段：{sorted(unknown)}")
@@ -154,9 +151,6 @@ def read_entrypoint(package: Path) -> str | None:
     text = file.read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError("entrypoint.md 不能为空")
-    from .path_lint import lint_text
-    if lint_text(text, "entrypoint.md"):
-        raise ValueError("entrypoint.md 包含绝对路径，必须使用相对路径")
     return text
 
 

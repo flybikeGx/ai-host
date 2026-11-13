@@ -85,7 +85,6 @@ git switch -c feat/codeagent-runtime
 ```sh
 git status --short
 git diff --check
-.venv/bin/python scripts/check_prompt_paths.py .
 git diff --cached --stat
 ```
 

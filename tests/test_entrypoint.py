@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from agent_base.conversations import Conversations
 from agent_base.package import load_package, read_entrypoint
-from agent_base.path_lint import check_prompts
 from agent_base.reports import parse_agent_report
 from agent_base.scheduler import Scheduler
 from agent_base.service import Service
@@ -151,13 +150,16 @@ def test_terminal_without_agent_report_and_prepared_endpoint(config, repo):
         assert client.get(f"/api/runs/{prepared['id']}/report").status_code == 409
 
 
-@pytest.mark.parametrize("entry", ["", "读取 /etc/passwd", "x" * (128 * 1024 + 1)])
+@pytest.mark.parametrize("entry", ["", "x" * (128 * 1024 + 1)])
 def test_bad_entrypoint_rejected(repo, entry):
     (repo / "entrypoint.md").write_text(entry)
     with pytest.raises(ValueError, match="entrypoint"):
         load_package(repo)
-    if "/etc/passwd" in entry:
-        assert any(i["file"] == "entrypoint.md" for i in check_prompts(repo))
+
+
+def test_entrypoint_absolute_path_text_is_reviewed_not_scanned(repo):
+    (repo / "entrypoint.md").write_text("读取 /etc/passwd 的示例格式；路径仅用于说明。")
+    assert "读取 /etc/passwd" in read_entrypoint(repo)
 
 
 def test_entrypoint_cannot_escape_frozen_repository(repo, tmp_path):

@@ -90,7 +90,7 @@ flowchart TB
 | `admin.py`、`mcp_server.py` | Admin 原生对话、管理 MCP、v1 业务工具桥接 |
 | `conversations.py` | 网页对话、原生 session 续接、事件持久化、文件范围 |
 | `web.py`、`frontend/` | JSON API、SSE、工作台和 React 对话台 |
-| `path_lint.py` | AGENTS/skill 文档与组装 prompt 的绝对路径检查 |
+| `review.py` | 候选仓库固定 commit 的只读审阅：准备候选、读取安装文档、复用候选安装 |
 
 以上模块位于 `src/agent_base/`；当前 CLI 适配逻辑仍分布在若干调用方，统一 RuntimeAdapter 是下一阶段重构项。
 
@@ -307,13 +307,7 @@ CLI 原生 session、home 和工作区按会话保持。Python 保存网页历�
 
 ## 7. 提示词、凭据与发布边界
 
-AGENTS 和 skill Markdown 只能使用相对路径。安装前后扫描这些文档及 skill 引用的 Markdown，v2 组装 prompt 后再检查；覆盖常见 POSIX、Windows 盘符、UNC、HOME 和 file URI 写法。HTTP URL 与正常相对路径允许通过。
-
-```sh
-.venv/bin/python scripts/check_prompt_paths.py .
-```
-
-这是静态检查，不能识别运行时任意代码动态生成的路径，也不能控制 CLI 自动生成的环境说明。基座配置、进程 cwd、MCP 挂载和日志可以包含机器绝对路径；这些路径不应复制到 AGENTS/skill 指令中。
+AGENTS 和 skill Markdown 是否依赖本机绝对路径由 Admin Agent 语义审阅：安装前用 prepare_repo_review 固定 commit，read_repo_review_doc 阅读 AGENTS.md、Installation.md/installation.md 和 entrypoint.md，结合上下文判断；URL、业务文本或仅用于说明的例子不算错误，发现真实路径依赖时报告文件、位置、原因和建议的相对路径写法。该审阅不是安装器的确定性检查，直接 CLI/API 安装不经审阅也不会被阻断；任务中仍使用相对路径。
 
 CLI 通过已有环境获得模型认证；本地业务工具会过滤名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量，外部 MCP 用明确的 from_env 引用。这个名称过滤不是恶意代码防护。CLI 自己的账户配置、企业审计与权限机制仍然有效。
 
@@ -358,7 +352,6 @@ Git 只发布源码、锁文件、静态前端、示例和审阅过的文档截�
 ```sh
 uv sync --frozen
 .venv/bin/python -m pytest -q
-.venv/bin/python scripts/check_prompt_paths.py .
 cd frontend
 npm ci
 # 未安装浏览器时先执行：npx playwright install chromium

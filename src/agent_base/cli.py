@@ -26,8 +26,6 @@ def main():
     opening.add_argument('--port', type=int, default=8765)
     knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
     knowledge.add_argument('knowledge_action', choices=['status','start','stop','restart'])
-    lint = commands.add_parser("lint", help="检查 AGENTS.md 和 skill 文档中的绝对路径")
-    lint.add_argument("paths", nargs="+", type=Path)
     repo = commands.add_parser("repo", help="管理 repo 长期安装、skills 和常驻 MCP")
     repo_actions = repo.add_subparsers(dest="repo_action", required=True)
     repo_install = repo_actions.add_parser("install")
@@ -84,17 +82,6 @@ def main():
             item.add_argument("--after", type=int, default=0)
     args = parser.parse_args()
     try:
-        if args.action == "lint":
-            from .path_lint import check_prompts
-            issues = []
-            for path in args.paths:
-                if not path.is_dir():
-                    raise ValueError(f"目录不存在：{path}")
-                issues.extend({"repo": str(path), **item} for item in check_prompts(path))
-            emit({"ok": not issues, "issues": issues})
-            if issues:
-                raise SystemExit(1)
-            return
         if args.action == "init":
             emit({"config": str(initialize(Path(args.config), engine=args.engine, command=args.command))})
             return

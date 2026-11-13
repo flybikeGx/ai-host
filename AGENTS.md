@@ -7,6 +7,7 @@
 ## 工作方式
 
 - 用户要求安装并运行：使用 submit_run，传 repo、任务及用户指定的 ref/model/effort。不要自行下载另一个 CLI 或编造模型名。
+- 安装和更新仓库前先审阅：使用 prepare_repo_review 准备候选并固定 commit，用 read_repo_review_doc 阅读 AGENTS.md、Installation.md/installation.md 和 entrypoint.md，结合上下文判断其中是否依赖本机绝对路径；URL、业务文本或仅用于说明的例子不算错误，缺少可选文件时如实说明。发现问题向用户报告文件、位置、原因和建议的相对路径写法，不擅自改写用户仓库。审阅通过后用带 candidate_id 的 install_repo_resources 安装同一 commit；安装步骤生成或修改文档时，可用 installation_id 复核安装后的同一版本文件（返回 phase 区分审阅阶段）。该审阅是语义判断而不是安装器的确定性检查；直接 CLI/API 安装不经审阅也不会被阻断。
 - repo 提供 schema_version:2 的 agent.yaml 或 Installation.md 配置块时，使用 install_repo_resources 长期安装资源；list_repo_resources/get_repo_resources 查看命名空间、skills、MCP 和服务状态。MCP 安装后常驻，任务结束不停止服务；只在用户明确要求时使用 stop_repo_resources，恢复用 start_repo_resources。同一安装版本的实例共享固定 skills 和 MCP 服务。
 - 用户要求反复运行、Web 激活或 cron：使用 register_work 注册（工作名、仓库、任务、输入数据目录、超时、可选 cron/时区），trigger_work 触发，list_works 查询。提醒需要常驻的 `agent-base serve` 或 `worker`；仅注册不表示调度器已经运行。不要擅自注册宿主机系统 cron。默认 overlap=skip，已有未结束运行时新触发会记录为 skipped_overlap。
 - 用户只要求安装：使用 install_repo。确认 prepared 后报告安装目录和 run_id；没有执行任务就不要说任务已完成。
@@ -20,7 +21,7 @@
 
 ## 运行约定
 
-仓库可以只有根 AGENTS.md 并显式提交任务；新导出 repo 推荐同时提供 Installation.md 和 entrypoint.md。清单来源为 agent.yaml，或 Installation.md 中唯一的 agent-base-install 配置块，二者不能同时提供机器配置。schema_version:2 使用 repo 长期安装与常驻 MCP；旧 schema_version:1 保持原有每次运行安装的兼容行为。支持 uv.lock 环境、固定 argv 安装步骤、JSON stdio 业务工具、stdio/HTTP MCP、SKILL.md 技能和产物验证。Installation.md 正文不作为自由安装脚本。AGENTS.md、entrypoint.md 和技能 Markdown 不允许绝对路径，安装前执行检查；任务中使用相对路径。
+仓库可以只有根 AGENTS.md 并显式提交任务；新导出 repo 推荐同时提供 Installation.md 和 entrypoint.md。清单来源为 agent.yaml，或 Installation.md 中唯一的 agent-base-install 配置块，二者不能同时提供机器配置。schema_version:2 使用 repo 长期安装与常驻 MCP；旧 schema_version:1 保持原有每次运行安装的兼容行为。支持 uv.lock 环境、固定 argv 安装步骤、JSON stdio 业务工具、stdio/HTTP MCP、SKILL.md 技能和产物验证。Installation.md 正文不作为自由安装脚本。AGENTS.md、entrypoint.md 和技能 Markdown 是否依赖本机绝对路径由 Admin 在安装前按上述流程语义审阅；任务中使用相对路径。
 
 默认接收用户/团队维护的可信仓库；安装和任务运行会执行仓库代码。目录和 venv 隔离不是多租户安全沙箱。无需为用户已请求的正常安装、运行、读取状态反复索取确认。
 

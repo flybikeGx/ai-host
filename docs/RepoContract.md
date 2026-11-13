@@ -13,7 +13,7 @@
 
 导出已有本地 Agent 见 [export-guild.md](export-guild.md)。Installation v2 保持同一安装版本固定 skills/环境和常驻 MCP 的机制，不因执行 entrypoint 每次重装资源。
 
-entrypoint 必须非空、UTF-8、大小不超过 128 KiB，使用相对路径；目录、越界符号链接及含绝对路径的入口会被拒绝。它与 AGENTS 和 skill 一样纳入路径检查，冻结到安装源后使用。修改原始文件不会改变已安装版本；更新并提交 repo 后重新安装新版本。
+entrypoint 必须非空、UTF-8、大小不超过 128 KiB，使用相对路径；目录和越界符号链接会被拒绝。它与 AGENTS 和 skill 一样在安装前接受 Admin 的绝对路径语义审阅，冻结到安装源后使用。修改原始文件不会改变已安装版本；更新并提交 repo 后重新安装新版本。
 
 ## 什么时候执行入口
 

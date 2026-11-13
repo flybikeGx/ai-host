@@ -56,9 +56,9 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 
 ## Repo 长期安装与资源命名空间
 
-`schema_version: 2` 支持在 `agent.yaml` 或 `Installation.md` 的固定配置块中列出 skills/MCP：同一安装版本共享固定 skills 与依赖，MCP 安装后常驻，任务结束不会停止。每个运行只发现自己 repo 的资源；提示词使用相对路径，安装时检查 AGENTS.md 与 skill 文档中的绝对路径。
+`schema_version: 2` 支持在 `agent.yaml` 或 `Installation.md` 的固定配置块中列出 skills/MCP：同一安装版本共享固定 skills 与依赖，MCP 安装后常驻，任务结束不会停止。每个运行只发现自己 repo 的资源；提示词使用相对路径，安装文档是否依赖本机绝对路径由 Admin 在安装前语义审阅。
 
-已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、路径检查与复现方法见 [RepoInstallation.md](docs/RepoInstallation.md)。
+已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、安装前审阅与复现方法见 [RepoInstallation.md](docs/RepoInstallation.md)。
 
 ## Web / cron 工作调度
 

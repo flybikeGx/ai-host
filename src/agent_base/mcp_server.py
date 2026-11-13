@@ -19,6 +19,7 @@ from mcp.server.stdio import stdio_server
 from .config import Config
 from .package import expand, within
 from .processes import run_process
+from .review import REVIEW_DOCUMENTS
 from .service import Service
 
 
@@ -34,7 +35,15 @@ def schema(properties: dict, required=()) -> dict:
 STRING = {"type": "string", "minLength": 1}
 RUN = {"run_id": STRING}
 ADMIN_TOOLS = {
-    "install_repo_resources": ("按 schema_version:2 清单长期安装 repo 的 skills/MCP，并启动常驻 MCP。重复安装复用资源。", schema({"origin": STRING, "ref": STRING}, ("origin",))),
+    "install_repo_resources": ("按 schema_version:2 清单长期安装 repo 的 skills/MCP，并启动常驻 MCP。重复安装复用资源。"
+                               "传 candidate_id 时复用 prepare_repo_review 固定的 commit 安装该候选，origin/ref 可省略且必须与候选一致。",
+                               schema({"origin": STRING, "ref": STRING, "candidate_id": STRING}, ())),
+    "prepare_repo_review": ("只读审阅：clone 仓库并把 ref 固定为 commit，返回候选 ID、commit 和 AGENTS/Installation/entrypoint 文档存在状态。"
+                            "不执行安装脚本、不启动业务 MCP、不触发任务；临时检出超过 24 小时自动清理。", schema({"origin": STRING, "ref": STRING}, ("origin",))),
+    "read_repo_review_doc": ("读取候选或已安装仓库的审阅文档（AGENTS.md、Installation.md、installation.md、entrypoint.md），单文件不超过 128 KiB。"
+                             "candidate_id 用于安装前审阅，installation_id 用于安装后复核同一版本，返回 phase 区分阶段。",
+                             schema({"candidate_id": STRING, "installation_id": STRING,
+                                     "document": {"type": "string", "enum": list(REVIEW_DOCUMENTS)}}, ("document",))),
     "list_repo_resources": ("列出 repo 安装、命名空间、skills/MCP 清单和服务进程状态。", schema({})),
     "get_repo_resources": ("查询 repo 资源清单与常驻 MCP 健康状态。", schema({"installation_id": STRING}, ("installation_id",))),
     "start_repo_resources": ("启动已安装 repo 的常驻 MCP，不执行工作。", schema({"installation_id": STRING}, ("installation_id",))),
@@ -63,7 +72,21 @@ def admin_call(service: Service, name: str, args: dict):
         from .repositories import Repositories
         repositories = Repositories(service.config)
         if name == "install_repo_resources":
-            return repositories.install(**args)
+            from .review import Reviews
+            if args.get("candidate_id"):
+                reviews = Reviews(service.config)
+                candidate = reviews.candidate(args["candidate_id"])
+                if args.get("origin") and args["origin"] != candidate["origin"]:
+                    raise ValueError("origin 与审阅候选不一致；安装复用候选时不要提供不同的 origin")
+                if args.get("ref") is not None and args["ref"] != candidate["ref"]:
+                    raise ValueError("ref 与审阅候选不一致；候选已固定 commit，不接受不同 ref")
+                item = repositories.install(candidate["origin"], candidate["ref"],
+                                            checkout=Path(candidate["root"]) / "checkout", commit=candidate["commit"])
+                reviews.consume(args["candidate_id"])
+                return item
+            if not args.get("origin"):
+                raise ValueError("需要 origin 或 candidate_id")
+            return repositories.install(args["origin"], args.get("ref"))
         if name == "list_repo_resources":
             return repositories.list()
         installation_id = args["installation_id"]
@@ -73,6 +96,18 @@ def admin_call(service: Service, name: str, args: dict):
             return repositories.stop(installation_id)
         item = repositories.get(installation_id)
         return {**item, "health": repositories.health(item)}
+    if name in {"prepare_repo_review", "read_repo_review_doc"}:
+        from .review import Reviews
+        reviews = Reviews(service.config)
+        if name == "prepare_repo_review":
+            return reviews.prepare(args["origin"], args.get("ref"))
+        if bool(args.get("candidate_id")) == bool(args.get("installation_id")):
+            raise ValueError("candidate_id 与 installation_id 必须且只能提供一个")
+        installation = None
+        if args.get("installation_id"):
+            from .repositories import Repositories
+            installation = Repositories(service.config).get(args["installation_id"])
+        return reviews.read(candidate_id=args.get("candidate_id"), installation=installation, document=args["document"])
     if name in {"register_work", "trigger_work", "list_works"}:
         from .scheduler import Scheduler
         scheduler = Scheduler(service.config)

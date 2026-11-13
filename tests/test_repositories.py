@@ -13,30 +13,9 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from agent_base.package import load_package
-from agent_base.path_lint import check_prompts, lint_text
 from agent_base.processes import alive
 from agent_base.repositories import Repositories
 from agent_base.service import Service
-
-
-def test_path_checker_handles_platforms_without_rejecting_relative_paths(tmp_path):
-    for text in ("读取 /Users/person/repo/data.json", r"读取 C:\work\data.json", r"读取 \\server\share\data", "读取 ~/data", "file:///tmp/data", "读取 /tmp/x", "../ok 然后 /etc/passwd", "读取 `/数据`", "读取 /用户/文档"):
-        assert lint_text(text, "test"), text
-    assert not lint_text("读取 .agent/skills/analysis/SKILL.md 和 ../input/data。https://example.org/mcp </user_task>", "test")
-    assert not lint_text("产物/检查通过，接收用户/团队维护的仓库。", "test")
-    (tmp_path / "AGENTS.md").write_text("读 input/data.json")
-    skill = tmp_path / "skills/a"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("读 references/guide.md")
-    (skill / "references").mkdir()
-    (skill / "references/guide.md").write_text("错误路径 /private/tmp/data")
-    issues = check_prompts(tmp_path)
-    assert len(issues) == 1 and issues[0]["file"] == "skills/a/references/guide.md"
-    custom = tmp_path / "capabilities/report"
-    custom.mkdir(parents=True)
-    (custom / "SKILL.md").write_text("读取 guide.md")
-    (custom / "guide.md").write_text("读取 /var/data")
-    assert len(check_prompts(tmp_path)) == 2
 
 
 def test_installation_markdown_is_unambiguous(resource_repos):
@@ -48,9 +27,24 @@ def test_installation_markdown_is_unambiguous(resource_repos):
     with pytest.raises(ValueError, match="机器配置来源"):
         load_package(root)
     (root / "agent.yaml").unlink()
-    (root / "AGENTS.md").write_text("读取 /Users/bad/file")
-    with pytest.raises(ValueError, match="绝对路径"):
-        load_package(root)
+
+
+def test_absolute_path_text_no_longer_blocks_installation_or_prompt(config, repositories, resource_repos):
+    root = resource_repos["finance"]
+    (root / "AGENTS.md").write_text("读取 /Users/person/repo/data.json、C:\\work\\data.json 和 ~/notes；这是示例文本。")
+    (root / "entrypoint.md").write_text("参考 /etc/hosts 的格式生成 artifacts/report.txt；路径仅用于说明。")
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "absolute path text"], check=True)
+    manifest = load_package(root)
+    assert manifest["schema_version"] == 2
+    item = repositories.install(str(root))
+    assert item["status"] == "ready"
+    service = Service(config)
+    final = service.wait(service.submit(str(root))["id"], 25)
+    assert final["status"] == "succeeded", final
+    prompt = (Path(final["root"]) / "prompt.txt").read_text()
+    assert "/Users/person/repo/data.json" in prompt and "参考 /etc/hosts" in prompt
 
 
 def test_install_once_persistent_mcp_and_stable_skills(repositories, resource_repos):
@@ -91,7 +85,6 @@ def test_three_namespaces_and_shared_service_across_runs(config, repositories, r
         assert report["skill_marker"] == name.upper() + "_SKILL_OK"
         assert final["result"]["verification"] == "checks_passed"
         assert not Path(final["workspace"]).exists()
-        assert not lint_text((Path(final["root"]) / "prompt.txt").read_text(), "prompt")
         patch = (Path(final["root"]) / "runtime.patch.yml").read_text()
         assert "projectRootMarkers" in patch and ".agent-base-root" in patch
         reports[name] = report

@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 
 from agent_base.config import Config
-from agent_base.path_lint import check_prompts, lint_text
 from agent_base.repositories import Repositories
 from agent_base.service import Service
 
@@ -18,7 +17,6 @@ installed = {}
 before = {}
 for name in ("finance", "inventory", "research"):
     repo = project / ".demo/resources" / name
-    assert not check_prompts(repo)
     item = repositories.install(str(repo))
     installed[name] = item
     skill = Path(item["root"]) / "skills/analysis/SKILL.md"
@@ -50,7 +48,6 @@ for label, final in finals.items():
     assert final["status"] == "succeeded", final
     assert final["result"]["verification"] == "checks_passed"
     prompt = (Path(final["root"]) / "prompt.txt").read_text()
-    assert not lint_text(prompt, "prompt")
     assert installed[name]["namespace"] in prompt
     for other, item in installed.items():
         if other != name:

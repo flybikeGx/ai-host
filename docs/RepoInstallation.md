@@ -146,16 +146,16 @@ API：
 
 admin MCP 对应 install_repo_resources、list_repo_resources、get_repo_resources、start_repo_resources、stop_repo_resources。普通 repo 实例不挂载这些管理工具。
 
-## 绝对路径检查
+## 安装前审阅
 
-```sh
-.venv/bin/agent-base lint .demo/resources/finance .demo/resources/inventory .demo/resources/research
-.venv/bin/python scripts/check_prompt_paths.py examples/repo-resources
-```
+安装文档是否依赖本机绝对路径由 Admin Agent 语义审阅，不再由安装器正则扫描。Admin 在安装或更新仓库前：
 
-扫描所有 AGENTS.md、entrypoint.md、SKILL.md、skills 目录及发现的 skill 子目录中的 Markdown；报告文件、行号、列号及命中的路径。检测常见 POSIX、Windows 盘符、UNC、file URI、HOME/用户目录写法，忽略 HTTP URL、相对路径和 prompt XML 标签。退出码 1 表示检查失败。
+1. `prepare_repo_review` 准备候选：clone 仓库并把 ref 固定为 commit，返回候选 ID、commit 和 AGENTS.md、Installation.md/installation.md、entrypoint.md 的存在状态；不执行安装脚本、不启动业务 MCP、不触发任务，临时检出超过 24 小时自动清理。
+2. `read_repo_review_doc` 读取上述文档（单文件不超过 128 KiB），结合上下文判断是否依赖本机绝对路径；URL、业务文本或仅用于说明的例子不算错误，缺少可选文件时如实说明。
+3. 发现问题时向用户报告文件、位置、原因和建议的相对路径写法，不擅自改写用户仓库；审阅通过后用带 candidate_id 的 `install_repo_resources` 安装同一 commit，避免审阅后分支移动安装到另一个版本。
+4. 安装步骤生成或修改文档时，可用 installation_id 复核安装后的同一版本文件，返回 phase=installed 区分阶段。
 
-v2 安装前后自动执行同一检查，生成的任务 prompt 也检查且不注入安装目录等绝对文件路径。静态检查针对文档中的路径字面量，不分析动态生成路径的任意程序。真实 CLI 自身生成的环境描述不在这个检查器的控制范围内。
+该审阅是语义判断而不是确定性检查；直接 CLI/API 安装不经审阅也不会被阻断。真实 CLI 自身生成的环境描述不在审阅范围内。
 
 ## 验收
 

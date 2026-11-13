@@ -161,8 +161,6 @@ class Repositories:
                     deadline=min(deadline, time.time() + step.get("timeout_seconds", 120)), cancelled=cancelled)
                 if code:
                     raise ValueError(f"初始化步骤 {index} 失败")
-            from .path_lint import require_portable
-            require_portable(source)  # Initialization must not introduce absolute prompt paths.
             skills = install_root / "skills"
             skills.mkdir()
             for skill in manifest.get("skills", []):
