@@ -306,3 +306,29 @@ def test_long_lived_gateway_strips_credentials_declared_after_start(config, repo
                     assert json.loads(answer.content[0].text)["late_visible"] is False
     asyncio.run(exercise())
     repositories.store.update(job["id"], status="cancelled")
+
+def test_installation_step_does_not_receive_declared_provider_credential(config, repositories, resource_repos,
+                                                                        monkeypatch):
+    # Installation steps are repo code and must not see the model credential,
+    # even when the declared name looks innocuous.
+    monkeypatch.setenv("ACCEPTANCE_LOGIN", "neutral-secret-do-not-log")
+    config.runtime["provider"] = "internal-gateway"
+    config.runtime["providers"] = {"internal-gateway": {
+        "api": "openai-completions", "base_url": "https://llm.internal.example/v1",
+        "api_key_env": "ACCEPTANCE_LOGIN", "models": [{"id": "internal-flash"}]}}
+    repo = resource_repos["finance"]
+    (repo / "tools/initialize.py").write_text(
+        "import json, os\n"
+        "from pathlib import Path\n"
+        "marker = Path('installation-count.txt')\n"
+        "previous = int(marker.read_text()) if marker.exists() else 0\n"
+        "marker.write_text(str(previous + 1))\n"
+        "Path('install-env.json').write_text(json.dumps({\n"
+        "    'neutral_visible': 'ACCEPTANCE_LOGIN' in os.environ,\n"
+        "    'builtin_visible': 'DEEPSEEK_API_KEY' in os.environ}))\n", encoding='utf-8')
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "probe install env"], check=True)
+    item = repositories.install(str(repo))
+    report = json.loads((Path(item["root"]) / "source/install-env.json").read_text(encoding='utf-8'))
+    assert report == {"neutral_visible": False, "builtin_visible": False}
