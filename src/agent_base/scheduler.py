@@ -26,11 +26,12 @@ def next_slot(expression: str, timezone: str, after: float) -> float:
 
 
 def copy_inputs(source: Path, target: Path, deadline: float, cancelled):
-    """Explicit input tree only; never dereference symlinks or copy credentials."""
+    """Explicit input tree only; never dereference links or copy credentials."""
+    from .dirlink import is_link
     ignored = {".git", ".venv", "node_modules", "__pycache__", ".agent-base", ".aws", ".ssh", ".codex", ".agents"}
     total = 0
     count = 0
-    if target.exists() or target.is_symlink():
+    if target.exists() or is_link(target):
         raise ValueError("仓库已含 input/，不能覆盖；请为外部工作数据保留 input/ 目录名")
     target.mkdir()
 
@@ -43,8 +44,8 @@ def copy_inputs(source: Path, target: Path, deadline: float, cancelled):
                 raise DeadlineExceeded("复制工作区超时")
             if entry.name in ignored or entry.name == ".env" or entry.name.startswith(".env."):
                 continue
-            if entry.is_symlink():
-                raise ValueError(f"输入工作区含符号链接，拒绝复制：{entry}")
+            if is_link(entry):
+                raise ValueError(f"输入工作区含符号链接或目录链接，拒绝复制：{entry}")
             dest = destination / entry.name
             count += 1
             if count > 10000:

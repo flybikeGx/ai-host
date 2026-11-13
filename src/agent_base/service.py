@@ -368,7 +368,8 @@ class Service:
             retained = not bool(temporary)
             if temporary:
                 try:
-                    shutil.rmtree(temporary)
+                    from .dirlink import remove_tree
+                    remove_tree(temporary)
                     self.store.event(run_id, "workspace.cleaned", {"path": str(temporary)})
                 except OSError as error:
                     retained = True

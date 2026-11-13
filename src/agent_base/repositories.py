@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .dirlink import create_directory_link, is_link, remove_tree
 from .engines import runtime_environment
 from .package import expand, freeze, load_package, within, instruction_hashes
 from .processes import alive, identity, kill_tree, run_process, spawn_options
@@ -139,7 +140,7 @@ class Repositories:
         if row and alive(row["pid"], row["birth"]):
             kill_tree(row["pid"], row["birth"])
         if install_root.exists():
-            shutil.rmtree(install_root)
+            remove_tree(install_root)
         install_root.mkdir(parents=True, mode=0o700)
         source = install_root / "source"
         manifest = freeze(checkout, source)
@@ -164,7 +165,7 @@ class Repositories:
             skills = install_root / "skills"
             skills.mkdir()
             for skill in manifest.get("skills", []):
-                (skills / skill["name"]).symlink_to(within(source, skill["path"]), target_is_directory=True)
+                create_directory_link(skills / skill["name"], within(source, skill["path"]))
             (install_root / "python.txt").write_text(python)
             (install_root / "token").write_text(secrets.token_urlsafe(32))
             (install_root / "token").chmod(0o600)
@@ -266,7 +267,7 @@ class Repositories:
         if not workspace.exists():
             shutil.copytree(source, workspace, ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__", "resolved.json"), symlinks=True)
         resource_dir = workspace / ".agent"
-        existing = resource_dir.exists() or resource_dir.is_symlink()
+        existing = resource_dir.exists() or is_link(resource_dir)
         if existing:
             catalog_file = resource_dir / "resources.json"
             if not reuse or not catalog_file.is_file() or json.loads(catalog_file.read_text()).get("installation_id") != installation_id:
@@ -274,13 +275,13 @@ class Repositories:
         else:
             resource_dir.mkdir()
             (workspace / ".agent-base-root").touch()
-            (resource_dir / "skills").symlink_to(Path(item["root"]) / "skills", target_is_directory=True)
+            create_directory_link(resource_dir / "skills", Path(item["root"]) / "skills")
         catalog = {"namespace": item["namespace"], "installation_id": installation_id,
                    "skills": [{"name": s["name"], "path": f".agent/skills/{s['name']}/SKILL.md"} for s in item["manifest"].get("skills", [])],
                    "mcp": [{"id": s["id"], "transport": s["transport"]} for s in item["manifest"].get("mcp", {}).get("servers", [])]}
         (resource_dir / "resources.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2))
         package = Path(job["root"]) / "package"
-        package.symlink_to(source, target_is_directory=True)
+        create_directory_link(package, source)
         (Path(job["root"]) / "interpreter.txt").write_text((Path(item["root"]) / "python.txt").read_text())
         (Path(job["root"]) / "receipt.json").write_text((Path(item["root"]) / "receipt.json").read_text())
         return item

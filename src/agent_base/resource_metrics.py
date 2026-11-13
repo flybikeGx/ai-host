@@ -83,7 +83,8 @@ class WorkspaceSampler:
         try:
             # Only registered workspaces inside managed state; external skill
             # links are ignored and shared templates are not charged per run.
-            if path.is_symlink() or not path.resolve().is_relative_to(self.data):
+            from .dirlink import is_link
+            if is_link(path) or not path.resolve().is_relative_to(self.data):
                 return {**result, 'logical_bytes': None, 'allocated_bytes': None, 'complete': False, 'state': 'outside'}
             if not path.is_dir():
                 return {**result, 'state': 'missing'}
@@ -100,6 +101,8 @@ class WorkspaceSampler:
                                 info = entry.stat(follow_symlinks=False)
                                 if stat.S_ISLNK(info.st_mode):
                                     continue
+                                if getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                                    continue  # junctions and other links are not workspace content
                                 if stat.S_ISDIR(info.st_mode):
                                     stack.append(Path(entry.path))
                                 elif stat.S_ISREG(info.st_mode):
