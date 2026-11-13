@@ -3,18 +3,35 @@
 Junctions are only used for the base's own directory mounts (installed skills,
 workspace skill mounts, run package mounts). Repo-content links stay symlinks
 and fail loudly when the platform cannot create them.
+
+The junction is written directly as a reparse point through DeviceIoControl, so
+paths never pass through `cmd.exe` or any other command interpreter. That
+matters because Windows paths may contain `&`, `^`, `%NAME%`, `!` or other cmd
+metacharacters even without spaces, and `mklink` is a cmd builtin.
 """
 from __future__ import annotations
 
 import os
 import stat as stat_module
-import subprocess
+import struct
 from pathlib import Path
 
 # ERROR_PRIVILEGE_NOT_HELD: the documented failure when a Windows user without
 # the symlink privilege (or Developer Mode) creates a symbolic link.
 PRIVILEGE_WINERRORS = {1314}
-JUNCTION_TIMEOUT_SECONDS = 30
+
+# Win32 constants for setting an IO_REPARSE_TAG_MOUNT_POINT reparse point.
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+FSCTL_SET_REPARSE_POINT = 0x000900A4
+GENERIC_WRITE = 0x40000000
+FILE_SHARE_READ = 0x1
+FILE_SHARE_WRITE = 0x2
+FILE_SHARE_DELETE = 0x4
+OPEN_EXISTING = 3
+FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+INVALID_HANDLE_VALUE = -1
+MAXIMUM_REPARSE_DATA_BUFFER_SIZE = 16 * 1024
 
 
 def is_junction(path) -> bool:
@@ -40,10 +57,69 @@ def is_privilege_error(error: BaseException) -> bool:
     return getattr(error, "winerror", None) in PRIVILEGE_WINERRORS
 
 
-def junction_argv(link: Path, target: Path) -> list[str]:
-    # Fixed command structure: paths travel as separate argv items and are
-    # quoted by list2cmdline, never concatenated into one shell source string.
-    return ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)]
+def junction_reparse_data(target) -> bytes:
+    """Build the REPARSE_DATA_BUFFER for a mount point, without any shell layer.
+
+    Layout: REPARSE_DATA_BUFFER (8 bytes) followed by MountPointReparseBuffer:
+    four USHORT name fields (8 bytes) and the path buffer holding the substitute
+    name (``\\??\\<target>``) and print name, each NUL-terminated in UTF-16.
+    """
+    target = str(target)
+    substitute = "\\??\\" + target
+    substitute_bytes = substitute.encode("utf-16-le")
+    print_bytes = target.encode("utf-16-le")
+    buffer = substitute_bytes + b"\0\0" + print_bytes + b"\0\0"
+    if 8 + 8 + len(buffer) > MAXIMUM_REPARSE_DATA_BUFFER_SIZE:
+        raise ValueError(f"junction 目标路径过长，超过 reparse 缓冲上限：{target}")
+    header = struct.pack("<IHH", IO_REPARSE_TAG_MOUNT_POINT, 8 + len(buffer), 0)
+    fields = struct.pack("<HHHH", 0, len(substitute_bytes),
+                         len(substitute_bytes) + 2, len(print_bytes))
+    return header + fields + buffer
+
+
+def _create_junction_native(link: Path, target: Path):
+    """Set the junction reparse point directly; no cmd.exe involvement."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                                         ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+                                         ctypes.c_void_p]
+    kernel32.DeviceIoControl.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    try:
+        link.mkdir()
+    except OSError as error:
+        raise ValueError(f"无法创建 junction 目录：{link}") from error
+    try:
+        handle = kernel32.CreateFileW(
+            str(link), GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, None, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, None)
+        if handle in (None, INVALID_HANDLE_VALUE, ctypes.c_void_p(-1).value):
+            raise ValueError(f"无法打开目录以设置 junction：{ctypes.WinError(ctypes.get_last_error())}")
+        try:
+            data = junction_reparse_data(target)
+            buffer = ctypes.create_string_buffer(data, len(data))
+            returned = wintypes.DWORD(0)
+            if not kernel32.DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer, len(data),
+                                            None, 0, ctypes.byref(returned), None):
+                raise ValueError(f"设置 junction 失败：{ctypes.WinError(ctypes.get_last_error())}")
+        finally:
+            kernel32.CloseHandle(handle)
+    except BaseException:
+        # Never leave a plain empty directory behind on failure.
+        try:
+            link.rmdir()
+        except OSError:
+            pass
+        raise
 
 
 def _is_local_volume(target: Path) -> bool:
@@ -65,18 +141,7 @@ def _validate_junction_target(target: Path):
         raise ValueError(f"junction 目标必须在本地卷上：{target}")
 
 
-def _create_junction(link: Path, target: Path):
-    _validate_junction_target(target)
-    try:
-        result = subprocess.run(junction_argv(link, target), capture_output=True, text=True,
-                                timeout=JUNCTION_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as error:
-        raise ValueError(f"mklink /J 超时：{link}") from error
-    if result.returncode:
-        detail = (result.stderr or result.stdout or "").strip()[-500:]
-        raise ValueError(f"mklink /J 失败（退出码 {result.returncode}）：{detail}")
-    # Verify the reparse point actually landed on the intended target; this
-    # also catches any argument the command interpreter may have mangled.
+def _verify_junction(link: Path, target: Path):
     try:
         if not is_junction(link):
             raise ValueError(f"junction 创建后校验失败：{link}")
@@ -85,6 +150,12 @@ def _create_junction(link: Path, target: Path):
             raise ValueError(f"junction 指向与预期不符：{link}")
     except OSError as error:
         raise ValueError(f"junction 创建后校验失败：{link}") from error
+
+
+def _create_junction(link: Path, target: Path):
+    _validate_junction_target(target)
+    _create_junction_native(link, target)
+    _verify_junction(link, target)
 
 
 def _create_windows(link: Path, target: Path):

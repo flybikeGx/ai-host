@@ -1,12 +1,12 @@
 import os
-import subprocess
+import struct
 from pathlib import Path
 
 import pytest
 
 from agent_base import dirlink
 from agent_base.dirlink import (create_directory_link, is_junction, is_link, is_privilege_error,
-                                junction_argv, remove_directory_link, remove_tree)
+                                junction_reparse_data, remove_directory_link, remove_tree)
 
 
 def test_symlink_create_and_remove_roundtrip_keeps_target(tmp_path):
@@ -83,12 +83,36 @@ def test_is_privilege_error_only_matches_windows_privilege_denial():
     assert not is_privilege_error(ValueError("x"))
 
 
-def test_junction_argv_uses_fixed_structure_with_separate_arguments(tmp_path):
-    link = tmp_path / "有空格 的链接"
-    target = tmp_path / "中文 目标/子目录"
-    argv = junction_argv(link, target)
-    assert argv == ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)]
-    assert all("&&" not in item and "|" not in item for item in argv[:5])
+def test_junction_reparse_data_passes_paths_verbatim_without_shell_escaping():
+    # No spaces, but every character that cmd would reinterpret if the path
+    # travelled through a command line: & ^ %NAME% ! plus spaces and Chinese.
+    target = "C:\\工作&a\\^b\\%USERNAME%\\!done\\目标 目录"
+    data = junction_reparse_data(target)
+    tag, data_length, reserved = struct.unpack("<IHH", data[:8])
+    assert tag == dirlink.IO_REPARSE_TAG_MOUNT_POINT
+    assert reserved == 0 and data_length == len(data) - 8
+    substitute_offset, substitute_length, print_offset, print_length = struct.unpack("<HHHH", data[8:16])
+    assert substitute_offset == 0 and print_offset == substitute_length + 2
+    buffer = data[16:]
+    substitute = buffer[:substitute_length].decode("utf-16-le")
+    print_name = buffer[print_offset:print_offset + print_length].decode("utf-16-le")
+    # Raw UTF-16, not a command line: & ^ % ! are data, never operators or
+    # variable references, and the original path is reproduced exactly.
+    assert substitute == "\\??\\" + target
+    assert print_name == target
+    assert "%USERNAME%" in print_name and "&" in substitute and "!" in substitute
+
+
+def test_junction_reparse_data_rejects_overlong_paths():
+    with pytest.raises(ValueError, match="reparse 缓冲上限"):
+        junction_reparse_data("C:\\" + ("很长" * 5000))
+
+
+def test_junction_creation_does_not_use_a_command_interpreter():
+    # `mklink` is a cmd builtin; the native reparse-point path must not import or
+    # shell out to a command interpreter at all.
+    assert not hasattr(dirlink, "subprocess")
+    assert not hasattr(dirlink, "junction_argv")
 
 
 def test_junction_target_validation_rejects_relative_file_and_unc(tmp_path):
@@ -108,32 +132,30 @@ def test_junction_target_validation_rejects_relative_file_and_unc(tmp_path):
         dirlink._validate_junction_target(Path("\\\\server\\share\\dir"))
 
 
-def test_windows_privilege_error_falls_back_to_junction(tmp_path, monkeypatch):
+def test_windows_privilege_error_falls_back_to_native_junction(tmp_path, monkeypatch):
     target = tmp_path / "junction 目标"
     target.mkdir()
     (target / "keep.txt").write_text("x", encoding="utf-8")
     link = tmp_path / "mount 链接"
     real_symlink = os.symlink
+    created = []
 
     def denied(*args, **kwargs):
         error = OSError(1314, "A required privilege is not held by the client")
         error.winerror = 1314
         raise error
 
+    def fake_native(link_path, target_path):
+        created.append((link_path, target_path))
+        real_symlink(target_path, link_path, target_is_directory=True)
+
     monkeypatch.setattr(os, "symlink", denied)
-    argv_seen = []
-
-    def fake_mklink(argv, **kwargs):
-        argv_seen.append(argv)
-        real_symlink(argv[6], argv[5])  # simulate what mklink /J produces
-        return subprocess.CompletedProcess(argv, 0, "", "")
-
-    monkeypatch.setattr(dirlink.subprocess, "run", fake_mklink)
+    monkeypatch.setattr(dirlink, "_create_junction_native", fake_native)
     # On POSIX the junction detector is a no-op; emulate the reparse point so
     # the post-creation verification runs exactly as it would on Windows.
     monkeypatch.setattr(dirlink, "is_junction", lambda path: Path(path).is_symlink())
     dirlink._create_windows(link, target)
-    assert argv_seen == [["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)]]
+    assert created == [(link, target)]
     assert (link / "keep.txt").is_file()
 
 
@@ -147,13 +169,12 @@ def test_windows_junction_failure_is_reported_not_masked(tmp_path, monkeypatch):
         error.winerror = 1314
         raise error
 
+    def failing_native(link_path, target_path):
+        raise ValueError("设置 junction 失败：拒绝访问")
+
     monkeypatch.setattr(os, "symlink", denied)
-
-    def failing_mklink(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 1, "", "You do not have sufficient privilege")
-
-    monkeypatch.setattr(dirlink.subprocess, "run", failing_mklink)
-    with pytest.raises(ValueError, match="mklink /J 失败"):
+    monkeypatch.setattr(dirlink, "_create_junction_native", failing_native)
+    with pytest.raises(ValueError, match="设置 junction 失败"):
         dirlink._create_windows(link, target)
 
 
@@ -169,10 +190,10 @@ def test_windows_other_symlink_errors_do_not_fall_back(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "symlink", denied)
 
-    def must_not_run(argv, **kwargs):
-        raise AssertionError("mklink must not be attempted for non-privilege errors")
+    def must_not_run(link_path, target_path):
+        raise AssertionError("junction must not be attempted for non-privilege errors")
 
-    monkeypatch.setattr(dirlink.subprocess, "run", must_not_run)
+    monkeypatch.setattr(dirlink, "_create_junction_native", must_not_run)
     with pytest.raises(ValueError, match="创建目录符号链接失败"):
         dirlink._create_windows(link, target)
 
@@ -184,11 +205,10 @@ def test_junction_verification_rejects_wrong_target(tmp_path, monkeypatch):
     wrong.mkdir()
     link = tmp_path / "link"
 
-    def fake_mklink(argv, **kwargs):
-        Path(argv[5]).symlink_to(wrong)  # interpreter mangled the argument
-        return subprocess.CompletedProcess(argv, 0, "", "")
+    def wrong_target(link_path, target_path):
+        Path(link_path).symlink_to(wrong)
 
-    monkeypatch.setattr(dirlink.subprocess, "run", fake_mklink)
+    monkeypatch.setattr(dirlink, "_create_junction_native", wrong_target)
     monkeypatch.setattr(dirlink, "is_junction", lambda path: Path(path).is_symlink())
     with pytest.raises(ValueError, match="指向与预期不符"):
         dirlink._create_junction(link, target)
