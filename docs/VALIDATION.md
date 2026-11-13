@@ -17,7 +17,7 @@
 - 同一份运行时配置生成 invocation patch：dsh 组合中已休眠加载的 `llm-pi-ai` 条目被就地配置，不重复插入第二个适配器实例。CLI Admin、网页 Admin、普通任务、cron 和 repo 多轮对话都经 `dsh_patch`，Run 和会话写入运行时快照，后续修改全局配置不会热切换已有会话。
 - 凭据只以环境变量名出现在配置、patch、快照和收据中。管理 MCP 子进程只额外获得所选 provider 的凭据引用，业务工具和业务 MCP 不继承。缺凭据、未定义 provider、模型不在目录、档位未声明、协议非法、`base_url` 带内嵌凭据或模型目录为空都在加载或启动时明确失败，没有自动换源。
 - `doctor` 输出所选 `provider`、`credential_env`、`credential_configured`，缺凭据返回非零；只报告配置状态，不冒充在线推理验证。
-- 真实 dsh 链路验证：本地 OpenAI 兼容测试网关记录到 2 次请求，两次均使用目录中的 `internal-flash`，第一次请求带 `gateway_report` 工具并以 `tool_calls` 结束，第二次携带 `tool` 消息并回传 `gateway-roundtrip` 结果；Run `0f8973495aa545eebfc1cb6b1ad893e7` 为 succeeded / checks_passed，Agent 自报 completed，产物 `artifacts/gateway-report.txt` 内容与工具输出一致。业务工具报告 `provider_credential_visible: false`；运行目录内所有文本文件都没有测试凭据值，patch 只含变量名。收据：`.agent-base/validations/provider-gateway-20261113-164608/result.json`。
+- 真实 dsh 链路验证：本地 OpenAI 兼容测试网关记录到 2 次请求，两次均使用目录中的 `internal-flash`，第一次请求带 `gateway_report` 工具并以 `tool_calls` 结束，第二次携带 `tool` 消息并回传 `gateway-roundtrip` 结果；Run `0f8973495aa545eebfc1cb6b1ad893e7` 为 succeeded / checks_passed，Agent 自报 completed，产物 `artifacts/gateway-report.txt` 内容与工具输出一致；运行目录内所有文本文件都没有测试凭据值，patch 只含变量名。同一场景的自动回归另断言业务工具输出 `provider_credential_visible: false`，即业务工具没有继承 provider 凭据。收据：`.agent-base/validations/provider-gateway-20261113-164608/result.json`。
 - 示例配置 `config/internal-gateway.example.toml` 与 [Providers.md](Providers.md) 不含凭据；`init` 生成的配置保留原有官方默认值，附注释形式的内部网关示例。
 
 ### C. Windows 目录链接与 junction 回退
