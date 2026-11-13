@@ -153,12 +153,13 @@ skills 声明路径必须包含 SKILL.md，关联 Markdown 也使用相对引用
 在 Agent Base 项目目录执行，以下 repo 路径仅为示例：
 
 ```sh
-.venv/bin/agent-base lint path-to-exported-repo
 .venv/bin/agent-base repo install path-to-exported-repo
 .venv/bin/agent-base run path-to-exported-repo --wait
 ```
 
-Git 导入前要把目标 repo 的必要文件提交为 Git commit。不要把作者机器实际路径粘进 AGENTS/entrypoint/skill；路径扫描也应包含这些文档的引用文件。
+导出后建议先交给 Admin Agent 审阅：它用 `prepare_repo_review` 固定 commit，用 `read_repo_review_doc` 读取 AGENTS.md、Installation.md/installation.md 和 entrypoint.md，结合上下文判断是否依赖本机绝对路径，再用同一候选安装。安装器不再扫描文档文本，所以这一步是语义审阅，不是一条退出码检查。
+
+Git 导入前要把目标 repo 的必要文件提交为 Git commit。不要把作者机器实际路径粘进 AGENTS/entrypoint/skill，也不要粘进它们引用的 Markdown（例如通过 skill 链接出去的工具说明）。
 
 验收应核对：安装只初始化一次、skills 和常驻 MCP 跨任务复用、实际工具调用、业务产物与 completion 检查、Run 的 report.json 和 agent_report。更换模型或 CLI 后重新试运行，不能仅凭安装成功宣布完整可用。
 
@@ -167,7 +168,7 @@ Git 导入前要把目标 repo 的必要文件提交为 Git commit。不要把�
 - [ ] AGENTS.md、Installation.md、entrypoint.md 各司其职。
 - [ ] 所有声明文件、skill、工具和检查脚本真实存在且已提交。
 - [ ] 依赖与环境变量**名称**说明清楚，没有真实凭据或原生会话。
-- [ ] AGENTS、entrypoint、skill 与其 Markdown 引用没有本机绝对路径。
+- [ ] AGENTS、entrypoint、skill 与其 Markdown 引用没有本机绝对路径（由 Admin 安装前审阅确认）。
 - [ ] 不携带 .agent、activation.json、运行日志、业务历史与私有输入。
 - [ ] 缺输入时可明确报告 blocked，无需等待人工回复。
 - [ ] 业务产物有独立检查；模型的自报检查不会冒充 checks_passed。

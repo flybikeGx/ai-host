@@ -44,6 +44,31 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 
 新机器安装见 [Installation.md](Installation.md)。本机默认配置为 `agent-base.toml`，运行数据保存在 `.agent-base`；两者和凭据文件都已加入忽略列表。
 
+## 模型 provider 配置
+
+不写 `[providers.*]` 时仍使用内置 `deepseek-official`，现有配置无需改动。需要内部网关或其他兼容端点时，在 `agent-base.toml` 声明路由，CLI Admin、网页 Admin、普通任务、cron 和 repo 多轮对话统一使用该路由：
+
+```toml
+[runtime]
+provider = "internal-gateway"
+model = "internal-flash"
+effort = "high"
+
+[providers.internal-gateway]
+api = "openai-completions"
+base_url = "https://llm.internal.example/v1"
+api_key_env = "INTERNAL_GATEWAY_API_KEY"
+
+[[providers.internal-gateway.models]]
+id = "internal-flash"
+context_window = 131072
+
+[providers.internal-gateway.models.reasoning_efforts]
+high = "high"
+```
+
+配置只引用凭据的环境变量名，不写值；缺少 provider、模型不在目录、档位未声明或凭据未设置都会明确失败，不会回退到官方 provider 或其他模型。字段、生效范围、快照语义和失败行为见 [docs/Providers.md](docs/Providers.md)，完整模板是 [config/internal-gateway.example.toml](config/internal-gateway.example.toml)。
+
 ## 网页对话
 
 侧栏新增 [运行仪表盘](docs/Dashboard.md)，打开 <http://127.0.0.1:8765/dashboard> 查看实际运行的 dsh 实例及工作区磁盘、逐个 MCP 服务的 CPU/内存、独立网关开销，以及整机趋势、队列/调度心跳和最近异常。空闲对话与常驻 MCP 不算 dsh 实例，结束后保留的工作区仍展示磁盘大小。状态约每 3 秒刷新，工作区大小约每 30 秒采样；查看页面不会触发模型或重启 MCP。

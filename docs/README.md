@@ -9,6 +9,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [Repo 安装与资源](RepoInstallation.md) | 清单、skills、常驻 MCP、资源命名空间和示例 |
+| [模型 provider 配置](Providers.md) | 内部网关路由、模型目录、凭据引用与失败行为 |
 | [Repo 运行契约](RepoContract.md) | entrypoint、任务参数、结构化汇报和产物验证 |
 | [本地 Agent 导出指南](export-guild.md) | 将已有本地 Agent 整理为可安装 repo |
 | [网页对话](WebChat.md) | 多轮会话、流式事件、取消和接口 |

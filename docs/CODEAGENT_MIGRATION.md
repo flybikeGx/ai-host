@@ -85,6 +85,10 @@ Copy-Item config/codeagent.example.toml agent-base.toml
 
 `bootstrap.py --skip-dsh` 会保留已有配置，但没有配置时仍按默认 dsh 初始化。因此迁移时优先用上面的 `uv sync` + CodeAgent 模板，不能以“跳过 dsh 安装”代替引擎配置。
 
+### 2.2.1 dsh provider 配置与 CodeAgent 的边界
+
+`agent-base.toml` 的 `[providers.*]` 只作用于 dsh 执行入口，用于经内部兼容网关路由模型请求，字段与失败行为见 [Providers.md](Providers.md)。切换到 `engine = "codeagent"` 后，认证、模型路由和 proxy 仍由该 CLI 及其企业登录配置负责；provider 定义不会转换成 CodeAgent 参数，因此不要以为配置了 provider 就完成了内网模型接入。
+
 ### 2.3 离线依赖注意事项
 
 `uv.lock` 与 npm lock 中包含公开源的解析信息。离线环境需要预先准备完整依赖缓存/内部制品，并实际测试 `uv sync --frozen --offline`；有镜像但没有对应锁定构件也会失败。不要盲目替换锁文件里的 URL 或删除哈希来掩盖缺包。
@@ -189,7 +193,7 @@ flowchart LR
 
 ### 5.3 skills 和发现范围
 
-继续使用 `.agent/resources.json`、`.agent/skills/<name>/SKILL.md` 和网关 `read_skill`，不要求 CodeAgent 支持某种专属 slash skill 格式。AGENTS/skill 指令保持相对路径，继续跑路径检查。
+继续使用 `.agent/resources.json`、`.agent/skills/<name>/SKILL.md` 和网关 `read_skill`，不要求 CodeAgent 支持某种专属 slash skill 格式。AGENTS/skill 指令保持相对路径，安装前由 Admin 按语义审阅是否依赖本机绝对路径，安装器不再扫描文本。
 
 若 CodeAgent 会向父目录自动加载 AGENTS、用户级 skill/MCP，需要确认其停止搜索或指定配置根的实际机制。dsh 的 `.agent-base-root` 是 dsh 配置约定，不能直接假设对 CodeAgent 有效。可以继续用说明约束全局可见资源，但当前 repo 挂载清单必须准确，验收要实际调用工具确认 namespace。
 
@@ -236,7 +240,7 @@ Windows 特别测试 `.cmd/.bat` 包装器、带空格路径、UTF-8 stdin、Ctr
 - [ ] 刷新/断网只重放 SSE，不重复推理；重复 client_key 不重复执行。
 - [ ] 显式停止/超时清理 CLI 子进程；监督进程消失归 interrupted，不自动重跑。
 - [ ] 同账号并发安全后再调整并发上限，并保留版本与平台说明。
-- [ ] AGENTS/skills 与组装 prompt 无绝对路径，配置/日志不泄露认证信息。
+- [ ] AGENTS/skills/entrypoint 经 Admin 审阅不含真实本机路径依赖，配置/日志不泄露认证信息。
 
 现有 `validate_resources.py`、`validate_chat.py` 等脚本按 dsh 基线编写，含原生身份/配置假设；需先审查和参数化再用于 CodeAgent，不能直接把 dsh 收据当成迁移完成证明。
 

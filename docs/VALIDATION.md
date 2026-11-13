@@ -1,5 +1,44 @@
 # 初版验证记录
 
+## 2026-11-13：第一阶段运行配置与跨平台修复
+
+自动回归 **151 项通过**（含 1 项既有 Starlette/httpx 弃用提示）。本次新增回归覆盖固定 commit 审阅、目录链接与 junction 回退、provider 配置校验、dsh patch 生成和真实 dsh 网关链路。
+
+### A. 文本路径扫描改由 Admin 审阅
+
+- 删除 `path_lint.py`、`scripts/check_prompt_paths.py`、CLI `lint` 子命令，以及安装、入口读取、初始化完成和提示词拼装中的调用；没有用另一套正则或硬编码表替代。`within()`、包内相对路径约束、产物越界和符号链接越界检查继续保留，并仍有独立回归。
+- 新增 `review.py` 与两个管理 MCP 工具：`prepare_repo_review` 用真实 `git clone` 固定 commit，返回候选 ID、commit 和 AGENTS.md、Installation.md、installation.md、entrypoint.md 的存在状态与大小；`read_repo_review_doc` 只允许这四个文档，单文件上限 128 KiB，越界路径和逃逸符号链接被拒绝。候选只读，不执行安装脚本、不启动业务 MCP、不触发任务，超过 24 小时由清理逻辑移除。
+- `install_repo_resources` 接受 `candidate_id`，安装同一候选 commit；审阅后分支移动不会换版本。安装步骤修改文档后可用 `installation_id` 复核同一安装版本，返回 `phase` 区分 candidate 与 installed。
+- 回归覆盖：固定 commit、文档缺失、超限、越界链接、候选过期清理、分支移动后仍安装原 commit、安装后复核、非法 origin/ref。根 AGENTS.md 和 RepoInstallation、RepoContract、DESIGN、export-guild 已改为语义审阅说明；本文件更早记录中的 `check_prompt_paths.py` 与 `agent-base lint` 描述是当时行为的历史记录，对应脚本已删除。
+
+### B. dsh provider 配置
+
+- `agent-base.toml` 的 `[providers.<name>]` 定义适配器、协议、端点、凭据环境变量名、模型目录和模型能力（容量、输出上限、输入模态、推理档位）。`deepseek-official` / `deepseek-account` 保持为内置路由，不能被自定义定义覆盖；未写 `[providers.*]` 时现有官方配置校验与行为不变。
+- 同一份运行时配置生成 invocation patch：dsh 组合中已休眠加载的 `llm-pi-ai` 条目被就地配置，不重复插入第二个适配器实例。CLI Admin、网页 Admin、普通任务、cron 和 repo 多轮对话都经 `dsh_patch`，Run 和会话写入运行时快照，后续修改全局配置不会热切换已有会话。
+- 凭据只以环境变量名出现在配置、patch、快照和收据中。管理 MCP 子进程只额外获得所选 provider 的凭据引用，业务工具和业务 MCP 不继承。缺凭据、未定义 provider、模型不在目录、档位未声明、协议非法、`base_url` 带内嵌凭据或模型目录为空都在加载或启动时明确失败，没有自动换源。
+- `doctor` 输出所选 `provider`、`credential_env`、`credential_configured`，缺凭据返回非零；只报告配置状态，不冒充在线推理验证。
+- 真实 dsh 链路验证：本地 OpenAI 兼容测试网关记录到 2 次请求，两次均使用目录中的 `internal-flash`，第一次请求带 `gateway_report` 工具并以 `tool_calls` 结束，第二次携带 `tool` 消息并回传 `gateway-roundtrip` 结果；Run `0f8973495aa545eebfc1cb6b1ad893e7` 为 succeeded / checks_passed，Agent 自报 completed，产物 `artifacts/gateway-report.txt` 内容与工具输出一致。业务工具报告 `provider_credential_visible: false`；运行目录内所有文本文件都没有测试凭据值，patch 只含变量名。收据：`.agent-base/validations/provider-gateway-20261113-164608/result.json`。
+- 示例配置 `config/internal-gateway.example.toml` 与 [Providers.md](Providers.md) 不含凭据；`init` 生成的配置保留原有官方默认值，附注释形式的内部网关示例。
+
+### C. Windows 目录链接与 junction 回退
+
+- 新增 `dirlink.py`，安装技能目录、Run 技能挂载和 package 挂载统一通过 `create_directory_link`：先建目录符号链接，仅在 Windows 上因 winerror 1314 缺权限失败时回退 `cmd.exe /d /c mklink /J`；其他失败（目标已存在、目标不是真实目录、mklink 失败）直接报错，不被当作权限不足吞掉。
+- junction 只接受绝对路径的真实本地目录，拒绝 UNC/网络目标和非本地卷；命令使用固定 argv 结构，路径作为独立参数传递，创建后校验确为 reparse point 且指向预期目录。识别同时检查符号链接与 junction；`remove_directory_link` 和 `remove_tree` 只断开链接，真实目录明确拒绝，不递归删除目标。
+- 回归覆盖：macOS 符号链接创建/清理并保留目标、拒绝重复创建与真实目录、删除树不跟随链接、权限错误才回退、固定命令结构、相对/文件/UNC 目标拒绝、mklink 失败上报、其他错误不回退、创建后目标不符拒绝、junction 识别仅在 Windows 生效。
+- macOS 真机：既有 4 个演示安装的技能挂载仍为目录符号链接且目标完整；完整回归中的真实 repo 安装/运行链路通过。
+
+### 尚未验收
+
+- Windows 真机：尚未在没有开发者模式的普通用户机器上执行安装、运行、取消和失败清理；junction 回退目前只有平台模拟测试，跨本地卷依赖 `GetDriveTypeW`，未在 Windows 上实测。
+- 真实内网网关：只用本地 OpenAI 兼容测试网关验证了协议、模型选择、工具调用、多轮工具结果和凭据隔离，尚未对接真实企业网关、代理、CA 和鉴权方式。
+- CodeAgent 内网：本阶段未改动其认证与适配，[CODEAGENT_MIGRATION.md](CODEAGENT_MIGRATION.md) 的验收项仍待现场执行。
+
+### 交付说明
+
+- 完成内容：上述 A/B/C 三个工作包及对应文档、示例配置与回归。
+- 自动检查：`uv run --frozen pytest -q` 等价的本机回归 151 项通过。
+- 遗留限制：Windows 真机与真实内网网关未验收；pi-ai 的 `compat`、`modelOverrides`、图片预算等高级字段暂未开放；详细字段见 [Providers.md](Providers.md)。
+
 ## 2026-11-11：集中式项目知识库与统一主页
 
 - Python 完整回归 **105 项通过**；新增 9 项验证正式知识与投稿隔离、版本/归档/恢复、幂等、并发审批冲突、管理员修订保留原稿、事务失败回滚、8,000 字符响应上限、固定版本章节分页、凭证撤销、管理员环境变量剔除、真实 MCP 及三 repo 跨实例链路。最终修改另复核知识/仪表盘 23 项与知识 9 项。

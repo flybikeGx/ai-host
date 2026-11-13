@@ -86,11 +86,12 @@ flowchart TB
 | `repositories.py` | repo 身份、版本安装、固定 skills、服务生命周期 |
 | `repo_server.py` | 每个安装版本的常驻 MCP 网关、上游连接与工具执行 |
 | `repo_runtime.py` | 资源清单、所属 namespace 的 prompt 与 dsh 挂载配置 |
-| `engines.py` | CLI 命令、环境、dsh patch 与输出解析；CodeAgent 基础入口 |
+| `engines.py` | CLI 命令、环境、dsh provider patch 与输出解析；CodeAgent 基础入口 |
 | `admin.py`、`mcp_server.py` | Admin 原生对话、管理 MCP、v1 业务工具桥接 |
 | `conversations.py` | 网页对话、原生 session 续接、事件持久化、文件范围 |
 | `web.py`、`frontend/` | JSON API、SSE、工作台和 React 对话台 |
 | `review.py` | 候选仓库固定 commit 的只读审阅：准备候选、读取安装文档、复用候选安装 |
+| `dirlink.py` | 跨平台目录链接：符号链接优先，Windows 缺权限时回退 junction，清理只断开链接 |
 
 以上模块位于 `src/agent_base/`；当前 CLI 适配逻辑仍分布在若干调用方，统一 RuntimeAdapter 是下一阶段重构项。
 
@@ -137,11 +138,11 @@ completion:
 flowchart LR
     ORIGIN[Git origin + ref] --> LOCK[获取安装锁]
     LOCK --> CLONE[clone / 固定 commit]
-    CLONE --> PARSE[解析清单 + 路径检查]
+    CLONE --> PARSE[解析清单]
     PARSE --> ID{已有相同安装?}
     ID -->|是| REUSE[复用固定资源 / 确认服务健康]
     ID -->|否| ENV[最终安装目录建环境 / 初始化一次]
-    ENV --> LINT[再次检查提示词 / 写安装收据]
+    ENV --> LINT[写安装收据]
     LINT --> GATEWAY[启动常驻网关和上游 MCP]
     GATEWAY --> READY[ready，可创建多个实例]
     REUSE --> READY
@@ -309,7 +310,7 @@ CLI 原生 session、home 和工作区按会话保持。Python 保存网页历�
 
 AGENTS 和 skill Markdown 是否依赖本机绝对路径由 Admin Agent 语义审阅：安装前用 prepare_repo_review 固定 commit，read_repo_review_doc 阅读 AGENTS.md、Installation.md/installation.md 和 entrypoint.md，结合上下文判断；URL、业务文本或仅用于说明的例子不算错误，发现真实路径依赖时报告文件、位置、原因和建议的相对路径写法。该审阅不是安装器的确定性检查，直接 CLI/API 安装不经审阅也不会被阻断；任务中仍使用相对路径。
 
-CLI 通过已有环境获得模型认证；本地业务工具会过滤名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量，外部 MCP 用明确的 from_env 引用。这个名称过滤不是恶意代码防护。CLI 自己的账户配置、企业审计与权限机制仍然有效。
+CLI 通过已有环境获得模型认证；dsh 也可用 `agent-base.toml` 的 `[providers.*]` 声明内部网关路由，凭据只以环境变量名引用，所有 dsh 入口共用同一运行时快照（见 [Providers.md](Providers.md)）。本地业务工具会过滤名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量，外部 MCP 用明确的 from_env 引用。这个名称过滤不是恶意代码防护。CLI 自己的账户配置、企业审计与权限机制仍然有效。
 
 Web 默认绑定 loopback，限制 Host 与跨 Origin 写请求，可使用 `AGENT_BASE_WEB_TOKEN`。这是本机管理面；公网服务和多租户身份权限需要另行设计。
 
@@ -376,7 +377,9 @@ npx playwright test
 - [x] **共享资源**：固定 skills、每安装版本常驻 MCP、任务结束不停止服务。
 - [x] **资源路由**：所属 namespace、read_skill、Run 上下文、每个 repo 独立发现清单。
 - [x] **MCP 运维**：健康检查、有限退避恢复、显式启停、工具错误与超时回执。
-- [x] **提示词路径检查**：AGENTS、skills Markdown、组装 prompt；提供独立脚本。
+- [x] **文档路径语义审阅**：安装前由 Admin 固定 commit 读取 AGENTS/Installation/entrypoint 并判断真实路径依赖；不再由安装器正则扫描文本。
+- [x] **模型 provider 配置**：`[providers.*]` 声明内部网关路由，统一生成所有 dsh 入口的 patch，凭据只引用环境变量；详见 Providers.md。
+- [x] **可移植目录链接**：目录符号链接封装，Windows 权限不足时回退 junction。
 - [x] **网页对话**：Admin + 所有 ready 安装、历史、工具卡片、产物下载、手机布局。
 - [x] **对话可靠性**：原生 session 续接、消息幂等、每会话互斥、SSE 重放、显式停止。
 - [x] **运行仪表盘**：MCP 网关/上游健康、Agent 实例、CPU/内存趋势、队列与心跳、异常/存储概况；共享后台采样，不调用模型。
