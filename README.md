@@ -4,23 +4,27 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 根 [AGENTS.md](AGENTS.md) 是 admin-agent 的指令，可以直接修改其管理方式。Python 不重新实现模型—工具循环，不调用 OpenAI-compatible 模型 API；模型请求由所选 CLI 负责。
 
-完整说明：[项目设计书与 TODO](DESIGN.md) · [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](GIT_GUIDE.md) · [验收记录](VALIDATION.md)。
+文档目录：[docs/README.md](docs/README.md)。
 
-网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[项目知识库](Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
+完整说明：[项目设计书与 TODO](docs/DESIGN.md) · [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](docs/GIT_GUIDE.md) · [验收记录](docs/VALIDATION.md)。
 
-知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](Knowledge.md)。
+汇报材料：[项目设计书草稿](docs/PROJECT_DESIGN_DRAFT.md)，按立项口径说明建设目标、服务场景、总体架构、模块职责、核心流程、权限治理与敏捷建设路径。
 
-Repo 引入：[本地 Agent 导出指南](export-guild.md) · [entrypoint 与结构化结果契约](RepoContract.md)。
+网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
 
-搁置设计：[用户隔离草案](USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
+知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](docs/Knowledge.md)。
+
+Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
+
+搁置设计：[用户隔离草案](docs/USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
 
 ## Repo 引入与无人值守入口
 
-将本地 Agent 整理为完整 repo，可把 [export-guild.md](export-guild.md) 交给本地编码 Agent。新导出的 repo 提供 AGENTS.md、Installation.md 和根 entrypoint.md：分别定义长期角色、安装资源和无人值守工作流程。
+将本地 Agent 整理为完整 repo，可把 [export-guild.md](docs/export-guild.md) 交给本地编码 Agent。新导出的 repo 提供 AGENTS.md、Installation.md 和根 entrypoint.md：分别定义长期角色、安装资源和无人值守工作流程。
 
 CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基座组合 `AGENTS.md + entrypoint.md + 本次参数/触发说明 + 如何汇报结果`。报告要求由基座动态注入，repo 不复制维护。普通网页/Admin 对话不自动执行 entrypoint。
 
-最终回复必须符合结构化 JSON 契约，解析到 `result.agent_report`；基座另写运行目录内的 `report.json`，记录可信状态、独立检查和归档产物。blocked、格式错误或产物缺失不会被判为成功。没有 entrypoint 的旧 repo 仍可使用 task/task.default，但实际 Run 也执行新的最终汇报契约。完整字段与兼容说明见 [RepoContract.md](RepoContract.md)。
+最终回复必须符合结构化 JSON 契约，解析到 `result.agent_report`；基座另写运行目录内的 `report.json`，记录可信状态、独立检查和归档产物。blocked、格式错误或产物缺失不会被判为成功。没有 entrypoint 的旧 repo 仍可使用 task/task.default，但实际 Run 也执行新的最终汇报契约。完整字段与兼容说明见 [RepoContract.md](docs/RepoContract.md)。
 
 ## 直接开始
 
@@ -42,19 +46,19 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 
 ## 网页对话
 
-侧栏新增 [运行仪表盘](Dashboard.md)，打开 <http://127.0.0.1:8765/dashboard> 查看实际运行的 dsh 实例及工作区磁盘、逐个 MCP 服务的 CPU/内存、独立网关开销，以及整机趋势、队列/调度心跳和最近异常。空闲对话与常驻 MCP 不算 dsh 实例，结束后保留的工作区仍展示磁盘大小。状态约每 3 秒刷新，工作区大小约每 30 秒采样；查看页面不会触发模型或重启 MCP。
+侧栏新增 [运行仪表盘](docs/Dashboard.md)，打开 <http://127.0.0.1:8765/dashboard> 查看实际运行的 dsh 实例及工作区磁盘、逐个 MCP 服务的 CPU/内存、独立网关开销，以及整机趋势、队列/调度心跳和最近异常。空闲对话与常驻 MCP 不算 dsh 实例，结束后保留的工作区仍展示磁盘大小。状态约每 3 秒刷新，工作区大小约每 30 秒采样；查看页面不会触发模型或重启 MCP。
 
-从 AGENTS 列表选择 Agent 发起新对话；最近对话默认显示全部，可按 Agent 筛选。独立 [定时页面](SchedulingUI.md) 位于 `/cron`，可图形化选择 Agent、一次性日期或每天/每周计划，使用 entrypoint 并查看结构化报告。
+从 AGENTS 列表选择 Agent 发起新对话；最近对话默认显示全部，可按 Agent 筛选。独立 [定时页面](docs/SchedulingUI.md) 位于 `/cron`，可图形化选择 Agent、一次性日期或每天/每周计划，使用 entrypoint 并查看结构化报告。
 
 启动 `.venv/bin/agent-base serve` 后打开 <http://127.0.0.1:8765/chat>，可以与 Admin Agent 和所有已安装 repo Agent 多轮对话。支持历史、实时文本与工具卡片、断线恢复、停止回复、模型/推理强度选择以及会话产物下载；repo 沿用固定 skills 和常驻 MCP。
 
-会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原工作台保留在 `/workbench`。设计参考、接口和测试见 [WebChat.md](WebChat.md)。
+会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原工作台保留在 `/workbench`。设计参考、接口和测试见 [WebChat.md](docs/WebChat.md)。
 
 ## Repo 长期安装与资源命名空间
 
 `schema_version: 2` 支持在 `agent.yaml` 或 `Installation.md` 的固定配置块中列出 skills/MCP：同一安装版本共享固定 skills 与依赖，MCP 安装后常驻，任务结束不会停止。每个运行只发现自己 repo 的资源；提示词使用相对路径，安装时检查 AGENTS.md 与 skill 文档中的绝对路径。
 
-已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、路径检查与复现方法见 [RepoInstallation.md](RepoInstallation.md)。
+已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、路径检查与复现方法见 [RepoInstallation.md](docs/RepoInstallation.md)。
 
 ## Web / cron 工作调度
 
@@ -64,7 +68,7 @@ CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基
 .venv/bin/agent-base serve --port 8765
 ```
 
-本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。
+本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](docs/Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。
 
 ## 本地示例
 
@@ -175,7 +179,7 @@ limits:
 
 model/effort 通过 invocation patch 的 agent-default-model 传递。权限模式通过该版本的环境和 approval patch 设置，未使用主干才新增的 CLI flags。admin 使用原生 `--session-id` 保持对话。
 
-CodeAgent 在 [engines.py](src/agent_base/engines.py) 保留了基于旧 MVP 的 print-mode 基本调用。可用 [配置模板](config/codeagent.example.toml) 准备内网单次推理探测，并将并发设为 1。**尚未内网验收，也未完成 MCP、Admin 和网页会话适配**；有 MCP/业务工具的清单会明确拒绝。完整迁移需同时调整 service、repo_runtime、admin 和 conversations 的运行时调用边界，步骤见 [迁移指南](CODEAGENT_MIGRATION.md)。
+CodeAgent 在 [engines.py](src/agent_base/engines.py) 保留了基于旧 MVP 的 print-mode 基本调用。可用 [配置模板](config/codeagent.example.toml) 准备内网单次推理探测，并将并发设为 1。**尚未内网验收，也未完成 MCP、Admin 和网页会话适配**；有 MCP/业务工具的清单会明确拒绝。完整迁移需同时调整 service、repo_runtime、admin 和 conversations 的运行时调用边界，步骤见 [迁移指南](docs/CODEAGENT_MIGRATION.md)。
 
 参考资料：[dsh CLI](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/cli)、[headless](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/bundle/headless)、[MCP 插件](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/mcp/mcp-client)。发布版行为以本地安装及验收为准。
 
@@ -185,4 +189,4 @@ CodeAgent 在 [engines.py](src/agent_base/engines.py) 保留了基于旧 MVP 的
 uv run --frozen pytest -q
 ```
 
-自动测试使用 fake dsh，覆盖任务全流程、Git 固定版本、安装后启动、并发、排队、取消、超时、失败产物、原生会话续接，并通过官方 Python MCP 客户端连接真实管理/业务 MCP server。真实外网 dsh 已另外通过 admin 和示例仓库验收，记录见 [VALIDATION.md](VALIDATION.md)。
+自动测试使用 fake dsh，覆盖任务全流程、Git 固定版本、安装后启动、并发、排队、取消、超时、失败产物、原生会话续接，并通过官方 Python MCP 客户端连接真实管理/业务 MCP server。真实外网 dsh 已另外通过 admin 和示例仓库验收，记录见 [VALIDATION.md](docs/VALIDATION.md)。

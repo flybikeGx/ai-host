@@ -10,7 +10,7 @@
 | inventory | analysis | domain__analyze | 求积：30 |
 | research | analysis | domain__analyze | 求平均：约 3.3333 |
 
-每个 [示例目录](examples/repo-resources) 都包含独立 AGENTS.md、Installation.md、skill、MCP 程序、初始化脚本、报告工具和验证脚本。相同的资源名称用于验证命名空间不会串用。
+每个 [示例目录](../examples/repo-resources) 都包含独立 AGENTS.md、Installation.md、skill、MCP 程序、初始化脚本、报告工具和验证脚本。相同的资源名称用于验证命名空间不会串用。
 
 ```sh
 .venv/bin/python scripts/create_resource_demos.py
@@ -36,7 +36,7 @@
 - 根 `agent.yaml`。
 - 根 `Installation.md` 或 `installation.md` 中唯一的 `agent-base-install` 代码块。
 
-两处不能同时放机器配置，Markdown 正文用于说明资源和依赖，不作为自由 shell 安装脚本。推荐参照 [finance/Installation.md](examples/repo-resources/finance/Installation.md)。
+两处不能同时放机器配置，Markdown 正文用于说明资源和依赖，不作为自由 shell 安装脚本。推荐参照 [finance/Installation.md](../examples/repo-resources/finance/Installation.md)。
 
 ````markdown
 # 示例初始化

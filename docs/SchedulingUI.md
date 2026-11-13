@@ -14,9 +14,9 @@
 
 从左侧“定时任务”进入 `/cron`，与聊天页共用当前页面内存中的认证 token。刷新或独立打开时，若服务要求认证，需要重新填写 token。
 
-![选择 Agent、日期、时间与时区](docs/assets/cron-desktop.png)
+![选择 Agent、日期、时间与时区](assets/cron-desktop.png)
 
-<img src="docs/assets/cron-mobile.png" alt="手机定时计划列表" width="300" />
+<img src="assets/cron-mobile.png" alt="手机定时计划列表" width="300" />
 
 创建计划时选择 Agent、名称、重复方式、时间和时区。支持“仅一次 / 每天 / 每周”，每周可选择多个星期。更多设置提供补充说明、模型、推理强度和执行超时。页面预览一次性执行时间或接下来的三次周期时间。
 

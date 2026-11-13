@@ -12,7 +12,7 @@
 
 同日知识库补充：[项目知识库](Knowledge.md) 已提供独立项目 namespace、集中式常驻 MCP、目录/摘要/章节渐进读取、Agent 投稿与管理员审批、不可变版本及基线冲突控制。主页统一为仪表盘，原工作台迁到 `/workbench`；4 个业务 MCP 无需重启。105 项 Python、15 项浏览器回归及两轮真实 dsh 已验证，细节见验收记录。
 
-本文描述**已经实现的系统**；未实现项集中列在文末 TODO。入口文档见 [README](README.md)，安装步骤见 [Installation.md](Installation.md)，内网切换见 [CodeAgent 迁移指南](CODEAGENT_MIGRATION.md)。
+本文描述**已经实现的系统**；未实现项集中列在文末 TODO。入口文档见 [README](../README.md)，安装步骤见 [Installation.md](../Installation.md)，内网切换见 [CodeAgent 迁移指南](CODEAGENT_MIGRATION.md)。
 
 ## 1. 项目目标与运行方式
 
@@ -32,11 +32,11 @@ Agent Base 把一个 Git 仓库变成可以安装、调度和对话的 Agent。�
 
 下图来自真实 dsh 验收：财务 Agent 读取固定 skill，通过常驻 MCP 完成计算、写出报告，再在下一轮依靠原生会话回答追问。截图中的模型文字属于对话内容；任务是否通过独立检查，应以基座的 `verification` 为准。
 
-![桌面网页对话：Admin 和三个仓库 Agent、工具调用与连续追问](docs/assets/chat-desktop.png)
+![桌面网页对话：Admin 和三个仓库 Agent、工具调用与连续追问](assets/chat-desktop.png)
 
 手机布局提供 Agent 抽屉、历史与输入区，中文输入法确认候选字时不会误发送。
 
-<img src="docs/assets/chat-mobile.png" alt="390px 手机网页对话界面" width="300" />
+<img src="assets/chat-mobile.png" alt="390px 手机网页对话界面" width="300" />
 
 截图已作为文档资产入库；原始运行日志、对话数据库与本机凭据不入库。
 
@@ -100,7 +100,7 @@ flowchart TB
 
 新仓库使用 `schema_version: 2`。机器配置可以放在根 `agent.yaml`，也可以放在 `Installation.md` 或 `installation.md` 中唯一的 `agent-base-install` 围栏块，不能同时提供两份机器配置。Markdown 正文用于说明，不会被解释成 shell 安装脚本。
 
-示意配置如下，完整可运行版本见 [finance 示例](examples/repo-resources/finance/Installation.md)：
+示意配置如下，完整可运行版本见 [finance 示例](../examples/repo-resources/finance/Installation.md)：
 
 ````markdown
 ```agent-base-install

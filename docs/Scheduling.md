@@ -136,4 +136,4 @@ OpenAPI 文档在 `/docs`。只监听 `127.0.0.1`，限制 Host，并拒绝跨 O
 
 真实验收通过本机 HTTP 注册/触发，等待真实墙钟分钟 cron，运行 dsh 与业务 MCP；检查两份指标报告、独立 session、5 秒超时、CLI 退出、源目录不变和成功临时目录删除。验收用 cron 第一次触发后即暂停，finally 也会尝试暂停；验收命令若被强制杀死，需用 `work list/pause` 核对。
 
-实现采用 [FastAPI lifespan](https://fastapi.tiangolo.com/advanced/events/) 启停调度线程，使用 [croniter](https://github.com/pallets-eco/croniter) 解析带时区的 cron。核心代码为 [scheduler.py](src/agent_base/scheduler.py)、[service.py](src/agent_base/service.py)、[web.py](src/agent_base/web.py)。
+实现采用 [FastAPI lifespan](https://fastapi.tiangolo.com/advanced/events/) 启停调度线程，使用 [croniter](https://github.com/pallets-eco/croniter) 解析带时区的 cron。核心代码为 [scheduler.py](../src/agent_base/scheduler.py)、[service.py](../src/agent_base/service.py)、[web.py](../src/agent_base/web.py)。

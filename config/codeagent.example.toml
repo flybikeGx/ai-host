@@ -1,5 +1,5 @@
 # 基础 print 调用模板。完整 MCP/Admin/网页对话尚待内网适配。
-# 详见 CODEAGENT_MIGRATION.md。复制到项目根 agent-base.toml 后编辑。
+# 详见 docs/CODEAGENT_MIGRATION.md。复制到项目根 agent-base.toml 后编辑。
 [storage]
 root = ".agent-base-codeagent"
 

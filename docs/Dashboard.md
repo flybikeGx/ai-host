@@ -2,7 +2,7 @@
 
 启动 `agent-base serve --port 8765` 后打开 <http://127.0.0.1:8765/dashboard>，或点击侧栏的“仪表盘”。对话、定时任务和仪表盘共用连接 Token；切换页面不会停止任务或回复。
 
-![仪表盘桌面概览](docs/assets/dashboard-desktop.png)
+![仪表盘桌面概览](assets/dashboard-desktop.png)
 
 ## 三类资源分别统计
 
@@ -18,7 +18,7 @@ MCP 列表保留所属安装名称用来辨别资源身份，但每个服务都�
 
 本机四个演示安装恰好各声明一个 `domain` stdio MCP，旧版约 118.9 MiB 是每个安装的“网关约 61 MiB + 上游 MCP 约 58 MiB”合计。新页面将两者拆开，空闲时的 dsh 实例表为空。不同业务安装的服务数量和资源不会照搬这个演示数值。
 
-![逐个 MCP、网关与工作区磁盘](docs/assets/dashboard-detail.png)
+![逐个 MCP、网关与工作区磁盘](assets/dashboard-detail.png)
 
 新网关在逐个打开 stdio 连接时登记进程身份。已有网关没有元数据时，只在本机子进程与该声明命令唯一匹配时归属，**不要求重启 MCP**。多个服务命令相同、进程包装不明或权限不足时显示未知，资源保留在网关未归属部分；不猜测或均摊。远程 HTTP MCP 展示连接状态，但本机无法测量远端 CPU/内存。
 
@@ -70,6 +70,6 @@ flowchart LR
 
 ## 手机与验证
 
-<img src="docs/assets/dashboard-mobile.png" alt="390px 手机仪表盘" width="300" />
+<img src="assets/dashboard-mobile.png" alt="390px 手机仪表盘" width="300" />
 
 自动测试覆盖实例与 MCP 独立归属、0/1/2 个服务、相同命令的不同服务、旧网关兼容、远端资源未知、工作区真实文件/链接/缓存/扫描上限、鉴权和手机布局。模型侧使用 fake CLI，MCP 为真实本机测试进程。完整记录见 [VALIDATION.md](VALIDATION.md)。

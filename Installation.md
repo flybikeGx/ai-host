@@ -21,13 +21,13 @@ Windows 对应执行 `.venv\Scripts\agent-base.exe`。Windows 的 Python 管理�
 
 手工准备 Python 环境可用 `uv sync --frozen`。已有本地 dsh 时不必重复 npm 安装。首次安装需要网络，企业环境可使用自己的 uv/npm 镜像配置。
 
-升级已有副本后也执行 `uv sync --frozen`，以安装 FastAPI/croniter 等锁定依赖。启动本地 Web 和 cron 调度用 `.venv/bin/agent-base serve`；仅后台调度用 `.venv/bin/agent-base worker`，二者无需同时启动。配置及已有运行数据保持不变。工作注册和演示步骤见 [Scheduling.md](Scheduling.md)。
+升级已有副本后也执行 `uv sync --frozen`，以安装 FastAPI/croniter 等锁定依赖。启动本地 Web 和 cron 调度用 `.venv/bin/agent-base serve`；仅后台调度用 `.venv/bin/agent-base worker`，二者无需同时启动。配置及已有运行数据保持不变。工作注册和演示步骤见 [Scheduling.md](docs/Scheduling.md)。
 
-仓库自身的初始化支持 `schema_version:2`：在 agent.yaml 或 Installation.md 的 agent-base-install 配置块列出 skills、MCP、依赖和初始化步骤。安装后 MCP 常驻、skills 固定共享，使用 `.venv/bin/agent-base repo install <repo>`。三个可运行示例与路径检查见 [RepoInstallation.md](RepoInstallation.md)。
+仓库自身的初始化支持 `schema_version:2`：在 agent.yaml 或 Installation.md 的 agent-base-install 配置块列出 skills、MCP、依赖和初始化步骤。安装后 MCP 常驻、skills 固定共享，使用 `.venv/bin/agent-base repo install <repo>`。三个可运行示例与路径检查见 [RepoInstallation.md](docs/RepoInstallation.md)。
 
-网页对话地址为 <http://127.0.0.1:8765/chat>，复用同一 serve 进程和模型凭据。生产前端文件已随项目构建，不需要启动单独 Node Web 服务或访问外部 CDN。只有修改 frontend 源码后才需要在该目录执行 `npm ci` 和 `npm run build`。详细说明见 [WebChat.md](WebChat.md)。
+网页对话地址为 <http://127.0.0.1:8765/chat>，复用同一 serve 进程和模型凭据。生产前端文件已随项目构建，不需要启动单独 Node Web 服务或访问外部 CDN。只有修改 frontend 源码后才需要在该目录执行 `npm ci` 和 `npm run build`。详细说明见 [WebChat.md](docs/WebChat.md)。
 
-需要带入内网时，参照 [CodeAgent CLI 迁移指南](CODEAGENT_MIGRATION.md) 准备独立配置和目标平台依赖；`--skip-dsh` 本身不会完成引擎切换。推送 Gitee 或使用离线 bundle 见 [Git 交接说明](GIT_GUIDE.md)。
+需要带入内网时，参照 [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) 准备独立配置和目标平台依赖；`--skip-dsh` 本身不会完成引擎切换。推送 Gitee 或使用离线 bundle 见 [Git 交接说明](docs/GIT_GUIDE.md)。
 ## 网页入口补充
 
-服务启动后，主页 `/` 进入仪表盘，原工作台迁到 `/workbench`；`/knowledge`、`/chat`、`/cron` 均可从统一侧栏进入。首次知识管理连接运行 `.venv/bin/agent-base open`，无需复制或显示 Token。Knowledge MCP 随 serve/worker 幂等启动，数据保存在忽略状态目录。详见 [Knowledge.md](Knowledge.md)。
+服务启动后，主页 `/` 进入仪表盘，原工作台迁到 `/workbench`；`/knowledge`、`/chat`、`/cron` 均可从统一侧栏进入。首次知识管理连接运行 `.venv/bin/agent-base open`，无需复制或显示 Token。Knowledge MCP 随 serve/worker 幂等启动，数据保存在忽略状态目录。详见 [Knowledge.md](docs/Knowledge.md)。

@@ -14,7 +14,7 @@
 
 已设置 `AGENT_BASE_WEB_TOKEN` 时，也可沿用侧栏连接设置。未设置时，基座在忽略状态目录生成权限为 0600 的本机知识管理凭据，不修改已有网页的可选认证行为。未建立管理连接时可浏览正式知识；投稿详情、绑定与所有写入/审批均要求管理认证。
 
-![知识库桌面界面](docs/assets/knowledge-desktop.png)
+![知识库桌面界面](assets/knowledge-desktop.png)
 
 1. 点击项目旁的加号创建 namespace，填写稳定项目标识和显示名。
 2. 在“知识文档”新建知识，填写标题、摘要和 Markdown 正文并发布。
@@ -72,6 +72,6 @@ namespace 与安装版本分开，一个项目可以绑定多个 repo。相同 r
 
 拟议 Installation 中 knowledge 字段仍未启用；以管理页面配置为权威。服务迁移时复制源码并不能迁移知识数据，应停写后使用 SQLite backup 接口备份/恢复数据库；不能只复制有活动 WAL 的主文件。源码离线 bundle 不包含知识、会话或凭据。
 
-<img src="docs/assets/knowledge-mobile.png" alt="手机知识库" width="300" />
+<img src="assets/knowledge-mobile.png" alt="手机知识库" width="300" />
 
 设计依据见 [KNOWLEDGE_BASE_DESIGN.md](KNOWLEDGE_BASE_DESIGN.md)，验证记录见 [VALIDATION.md](VALIDATION.md)。

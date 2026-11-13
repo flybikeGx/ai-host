@@ -64,7 +64,7 @@ CLI 仍输出原生 NDJSON/文本协议；基座只要求其**最终回复的 te
 }
 ```
 
-正式 schema 由基座提供：[agent-report-v1.schema.json](src/agent_base/schemas/agent-report-v1.schema.json)。字段全部必需，数组可以为空，不允许额外字段；报告文本上限 256 KiB。`description` 和检查的 `details` 可选。
+正式 schema 由基座提供：[agent-report-v1.schema.json](../src/agent_base/schemas/agent-report-v1.schema.json)。字段全部必需，数组可以为空，不允许额外字段；报告文本上限 256 KiB。`description` 和检查的 `details` 可选。
 
 | status | 含义 | Run 结果 |
 | --- | --- | --- |
@@ -137,6 +137,6 @@ GET /api/runs/{run_id}/report
 
 CodeAgent 的基本 print 路径也解析同一 Agent 最终报告，但它的 MCP/Admin/连续会话限制保持不变；这里没有声称完成内网适配。
 
-可运行例子：[hello 入口](examples/hello-agent/entrypoint.md)、[cron 入口](examples/scheduled-agent/entrypoint.md)、[finance 入口](examples/repo-resources/finance/entrypoint.md)。已有生成到本机忽略目录的演示 Git repo 不会自动覆盖；需要重新生成到新目录或显式更新其提交并安装，才能使用新版入口。
+可运行例子：[hello 入口](../examples/hello-agent/entrypoint.md)、[cron 入口](../examples/scheduled-agent/entrypoint.md)、[finance 入口](../examples/repo-resources/finance/entrypoint.md)。已有生成到本机忽略目录的演示 Git repo 不会自动覆盖；需要重新生成到新目录或显式更新其提交并安装，才能使用新版入口。
 
 测试覆盖：entrypoint 单独启动、附加 task、旧默认任务、cron、准备后启动、冻结源、v2 常驻服务、交互会话不注入入口、非法入口/报告、产物归档、blocked、超时/取消及报告 HTTP 接口。自动测试使用 fake CLI 和真实本地 MCP；另有一次真实 dsh 的 entrypoint → MCP → 产物检查 → JSON 汇报验收通过，见 [VALIDATION.md](VALIDATION.md)。CodeAgent 内网验收仍未完成。

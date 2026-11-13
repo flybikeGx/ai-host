@@ -88,7 +88,7 @@ entrypoint.md 示例：
 
 ## 5. 资源清单
 
-下面是字段示意，所引用的脚本/skill 必须真实提供；完整可运行例子见 [finance](examples/repo-resources/finance/Installation.md)。
+下面是字段示意，所引用的脚本/skill 必须真实提供；完整可运行例子见 [finance](../examples/repo-resources/finance/Installation.md)。
 
 ````markdown
 # 安装
