@@ -310,7 +310,7 @@ CLI 原生 session、home 和工作区按会话保持。Python 保存网页历�
 
 AGENTS 和 skill Markdown 是否依赖本机绝对路径由 Admin Agent 语义审阅：安装前用 prepare_repo_review 固定 commit，read_repo_review_doc 阅读 AGENTS.md、Installation.md/installation.md 和 entrypoint.md，结合上下文判断；URL、业务文本或仅用于说明的例子不算错误，发现真实路径依赖时报告文件、位置、原因和建议的相对路径写法。该审阅不是安装器的确定性检查，直接 CLI/API 安装不经审阅也不会被阻断；任务中仍使用相对路径。
 
-CLI 通过已有环境获得模型认证；dsh 也可用 `agent-base.toml` 的 `[providers.*]` 声明内部网关路由，凭据只以环境变量名引用，所有 dsh 入口共用同一运行时快照（见 [Providers.md](Providers.md)）。本地业务工具会过滤名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量，外部 MCP 用明确的 from_env 引用。这个名称过滤不是恶意代码防护。CLI 自己的账户配置、企业审计与权限机制仍然有效。
+CLI 通过已有环境获得模型认证；dsh 也可用 `agent-base.toml` 的 `[providers.*]` 声明内部网关路由，凭据只以环境变量名引用，所有 dsh 入口共用同一运行时快照。CLI 进程用固定别名持有凭据，业务子进程按声明名剔除（见 [Providers.md](Providers.md)）。本地业务工具会过滤名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量，外部 MCP 用明确的 from_env 引用。这个名称过滤不是恶意代码防护。CLI 自己的账户配置、企业审计与权限机制仍然有效。
 
 Web 默认绑定 loopback，限制 Host 与跨 Origin 写请求，可使用 `AGENT_BASE_WEB_TOKEN`。这是本机管理面；公网服务和多租户身份权限需要另行设计。
 

@@ -93,15 +93,15 @@ Run 不重新安装、复制或改写共享 skills。其 package 也引用固定
 
 ## 目录链接与 Windows junction
 
-安装技能目录、Run 工作区的技能挂载和 package 挂载都通过同一个目录链接封装创建：默认创建目录符号链接；仅在 Windows 上因缺少符号链接权限（`ERROR_PRIVILEGE_NOT_HELD`，winerror 1314）失败时，回退到 `cmd.exe /d /c mklink /J` 创建 junction。macOS/Linux 行为不变。
+安装技能目录、Run 工作区的技能挂载和 package 挂载都通过同一个目录链接封装创建：默认创建目录符号链接；仅在 Windows 上因缺少符号链接权限（`ERROR_PRIVILEGE_NOT_HELD`，winerror 1314）失败时，回退到 junction。macOS/Linux 行为不变。
 
-- 只对已确认的权限错误回退。链接位置已存在、目标不是真实目录、文件系统不支持或 `mklink` 自身失败都直接报错并保留原因，不把其他失败当作权限不足吞掉。
-- junction 只用于本地目录：目标必须是绝对路径的真实本地目录，拒绝 UNC/网络映射目标和非本地卷，也不静默改成复制。不同本地卷可以成立。
-- `cmd.exe` 调用使用固定命令结构，路径作为独立参数经 Windows 参数编码传递，不把任意路径拼进 shell 源码；创建后校验确为 junction 且指向预期目录。
+- 只对已确认的权限错误回退。链接位置已存在、目标不是真实目录、文件系统不支持或写入 reparse point 失败都直接报错并保留原因，不把其他失败当作权限不足吞掉。
+- junction 直接通过 `DeviceIoControl(FSCTL_SET_REPARSE_POINT)` 写入 mount point reparse point，不调用 `cmd.exe`、`mklink` 或任何命令解释器。目标路径以 UTF-16 数据写入 reparse buffer，因此无空格的 `&`、`^`、字面 `%NAME%`、`!` 以及空格、中文都不会被解释或展开。
+- junction 只用于本地目录：目标必须是绝对路径的真实本地目录，拒绝 UNC/网络映射目标和非本地卷，也不静默改成复制。不同本地卷可以成立；路径超过 reparse 缓冲上限时明确报错。
 - 识别链接时同时检查符号链接和 reparse point（junction），不只看 `is_symlink()`。清理只移除链接本身，目标目录及其内容不受影响；真实目录不会被当作链接删除。删除临时工作区时先断开内部链接再删除目录。
 - 目录链接的封装不替代文件符号链接语义：`copytree(symlinks=True)`、repo 内容中的文件链接仍按原语义判断，只有基座自己的目录挂载使用 junction 回退。
 
-macOS 上目录 symlink 创建、复用和清理已有回归覆盖；junction 回退路径已按 reparse point 解析和参数处理实现并测试，但尚未在 Windows 真机验收。
+macOS 上目录 symlink 创建、复用和清理已有回归覆盖。junction 的 reparse 数据结构、特殊字符原样传递和创建后校验有平台无关回归，但原生创建和清理尚未在 Windows 真机执行。
 
 ## MCP 为什么可以一直运行
 

@@ -1,5 +1,31 @@
 # 初版验证记录
 
+## 2026-11-13：工单 001 验收问题修复（F1/F2）
+
+自动回归 **159 项通过**（含 1 项既有 Starlette/httpx 弃用提示）。
+
+### F1 凭据隔离改为按声明名执行
+
+- 启动 dsh 时，运行时快照里所有 provider 声明的 `api_key_env` 名都从 CLI 环境移除；所选 provider 的值改以固定别名 `AGENT_BASE_PROVIDER_API_KEY` 传入。别名含 `KEY`，因此 dsh 自身的子进程环境清洗也会剔除它。pi-ai 的 `apiKeyEnv` 写入别名，不再出现声明名。
+- 业务侧不依赖命名习惯：v1 本地工具通过 patch 中的 `AGENT_BASE_CREDENTIAL_ENV_NAMES` 获得声明名清单并逐个剔除，同时保留既有 `API_KEY/TOKEN/SECRET/PASSWORD` 过滤；v2 常驻网关在每次调用时按当前配置的声明名剔除。v1 由 dsh 挂载的业务 MCP server 从父环境继承不到声明名或别名；v2 上游 MCP 使用 MCP SDK 的受限默认环境。
+- repo 安装步骤、`uv sync`、clone/checkout、完成检查等 repo 代码子进程，以及知识服务，都不持有 provider 凭据；常驻 repo 服务以无凭据环境启动，不因某个 Run 的 provider 补发凭据。
+- 管理 MCP 是获授权进程，显式获得所选 provider 的别名引用，用于它自己提交的 Run；不再依赖固定的 `DEEPSEEK_*` 变量列表。
+- 真实 dsh + 本地网关，中性变量名 `ACCEPTANCE_LOGIN`：Run `f855fa00a89f4c6bab44237db9bb84e2` succeeded / checks_passed。工具实际输出 `provider_credential_visible: false`；patch 只含别名与变量名清单，不含密钥值；运行目录全部文本文件均无测试凭据值。收据：`.agent-base/validations/provider-alias-20261113-171302/result.json`。
+- v2 常驻网关集成回归调用本地 `probe_credential` 工具，返回 `neutral_visible: false`、`builtin_visible: false`，证明先启动的服务也不会把凭据交给业务工具。
+- 验收复现脚本 `tickets/acceptance/test_provider_credential_name.py` 现在通过（2 passed）。网关回归同时覆盖含关键词名与中性名两种声明。
+
+### F2 junction 不再经过命令解释器
+
+- 不再调用 `cmd.exe` / `mklink`：junction 直接通过 `DeviceIoControl(FSCTL_SET_REPARSE_POINT)` 写入 mount point reparse point。目标路径以 UTF-16 数据写入 reparse buffer，无空格的 `&`、`^`、字面 `%NAME%`、`!` 以及空格、中文都不会被解释或展开；模块不再引用 `subprocess`。
+- 保留“仅 winerror 1314 缺符号链接权限才回退”的策略、本地卷/UNC 拒绝、创建后 reparse point 与目标身份校验；路径超过 reparse 缓冲上限时明确报错。
+- 新增回归：reparse buffer 头部与名字偏移、特殊字符原样保留、超长路径拒绝、回退只在权限错误发生、创建后目标不符拒绝、失败向上报告、模块不含 `subprocess`/`mklink`。macOS 目录符号链接创建、复用与清理回归继续通过。
+
+### 尚未验收
+
+- Windows 真机：junction 的原生创建、普通用户安装/运行/取消/失败清理、跨本地卷与特殊字符路径。当前只有平台无关的数据结构与参数验证。
+- 真实内网网关：端点、代理、CA、鉴权方式和实际模型目录。
+- Linux 实机与 CodeAgent 内网适配，范围同上一记录。
+
 ## 2026-11-13：第一阶段运行配置与跨平台修复
 
 自动回归 **151 项通过**（含 1 项既有 Starlette/httpx 弃用提示）。本次新增回归覆盖固定 commit 审阅、目录链接与 junction 回退、provider 配置校验、dsh patch 生成和真实 dsh 网关链路。

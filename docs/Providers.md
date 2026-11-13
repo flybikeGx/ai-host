@@ -66,8 +66,11 @@ high = "high"
 
 - 配置、invocation patch、安装收据、API 响应和日志只出现环境变量名，不出现密钥值。
 - 启动前在同一个 shell 里设置该变量，例如 `export INTERNAL_GATEWAY_API_KEY=...`。
-- 管理 MCP 子进程只额外获得所选 provider 的凭据引用（以及既有的 `DEEPSEEK_*` 代理变量），不再依赖固定的 DeepSeek 变量列表。
-- 普通业务工具和 repo 业务 MCP 仍只拿到清单声明的环境；provider 凭据不会因为选了自定义路由就传给它们。
+- 隔离按**声明的名字**执行，不依赖 `KEY`/`TOKEN` 之类的命名习惯。启动 dsh 时，所有 `[providers.*]` 声明的 `api_key_env` 都从 CLI 环境中移除，所选 provider 的值改放在固定别名 `AGENT_BASE_PROVIDER_API_KEY` 下交给 LLM 适配器。别名本身含 `KEY`，因此 dsh 对子进程的清洗也会剔除它。
+- 业务侧拿不到这个值：v1 本地工具和 v2 常驻网关本地工具在启动业务程序前，按声明名和关键词双重剔除；v1 由 dsh 挂载的业务 MCP server 继承不到声明名或别名；v2 常驻网关的上游 MCP 使用 MCP SDK 的受限默认环境。
+- repo 安装步骤、依赖解析和完成检查等 repo 代码子进程也会移除 provider 凭据（含内置 DeepSeek 凭据），避免业务脚本读到模型密钥。
+- 常驻 repo 服务以无凭据环境启动，不持有 provider 凭据；它可能先于某个 Run 启动，因此不按 Run 的 provider 补发凭据。
+- 管理 MCP 是获授权进程，显式获得所选 provider 的别名引用（以及既有的 `DEEPSEEK_*`、代理变量），用于它自己启动的 Run；不再依赖固定的 DeepSeek 变量列表。
 - `doctor` 输出 `provider`、`credential_env` 和 `credential_configured`，缺凭据时返回非零。它只报告配置和凭据状态，不发推理请求。
 
 ## 生效范围与快照
