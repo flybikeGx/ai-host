@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .dirlink import create_directory_link, is_link, remove_tree
-from .engines import runtime_environment
+from .engines import provider_credential_names, runtime_environment, scrub_environment
 from .package import expand, freeze, load_package, within, instruction_hashes
 from .processes import alive, identity, kill_tree, run_process, spawn_options
 from .store import Store
@@ -149,15 +149,18 @@ class Repositories:
                 (digest, repo_id, origin, commit, str(install_root), json.dumps(manifest), time.time()))
         try:
             python = sys.executable
+            # Repo code (dependency resolution and installation steps) never
+            # receives a model provider credential.
+            install_env = scrub_environment(os.environ, provider_credential_names(self.config.runtime), keywords=False)
             if manifest.get("environment", {}).get("lockfile"):
-                env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(install_root / "env"), "UV_CACHE_DIR": str(self.config.data / "uv-cache")}
+                env = {**install_env, "UV_PROJECT_ENVIRONMENT": str(install_root / "env"), "UV_CACHE_DIR": str(self.config.data / "uv-cache")}
                 code = run_process(["uv", "sync", "--frozen", "--no-dev", "--project", str(source)], cwd=source, env=env,
                                    output=install_root / "dependencies.log", error=install_root / "dependencies.stderr.log", deadline=deadline, cancelled=cancelled)
                 if code:
                     raise ValueError("安装依赖失败")
                 python = str(install_root / "env" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
             for index, step in enumerate(manifest.get("installation", {}).get("steps", [])):
-                code = run_process(expand(step["argv"], source, source, python), cwd=source, env=dict(os.environ),
+                code = run_process(expand(step["argv"], source, source, python), cwd=source, env=install_env,
                     output=install_root / f"install-{index}.log", error=install_root / f"install-{index}.stderr.log",
                     deadline=min(deadline, time.time() + step.get("timeout_seconds", 120)), cancelled=cancelled)
                 if code:
@@ -213,7 +216,7 @@ class Repositories:
                 kill_tree(item["pid"], item["birth"])
             ready = root / "service.json"
             ready.unlink(missing_ok=True)
-            env = runtime_environment(self.config.runtime, root / "service-home")
+            env = runtime_environment(self.config.runtime, root / "service-home", credential=False)
             with (root / "service.log").open("ab") as log:
                 child = subprocess.Popen([sys.executable, "-m", "agent_base.repo_server", "--config", str(self.config.path),
                     "--installation", installation_id], stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env, **spawn_options())

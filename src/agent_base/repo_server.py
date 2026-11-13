@@ -28,10 +28,27 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .config import Config
+from .engines import (CREDENTIAL_NAME_MARKER, declared_credential_names, parse_credential_names,
+                      scrub_environment)
 from .package import expand, within
 from .processes import run_process
 from .repositories import Repositories
 from .resource_metrics import direct_children
+
+
+def current_credential_names(config) -> set[str]:
+    """Declared names now, not only at service start.
+
+    A long-lived gateway may have started before the provider definition was
+    added; reload the config file (falling back to the startup snapshot) so a
+    later Run's credential is still stripped from business tools.
+    """
+    names = set(declared_credential_names(config.runtime))
+    try:
+        names |= declared_credential_names(Config.load(config.path).runtime)
+    except (OSError, ValueError):
+        pass
+    return names
 
 
 def env_values(values):
@@ -125,7 +142,9 @@ def application(config, item, endpoint):
                     def is_cancelled():
                         current = store.get(run_id)
                         return cancelled.is_set() or current["cancel_requested"] or current["status"] not in {"preparing", "running", "verifying"}
-                    env = {k: v for k, v in os.environ.items() if not any(x in k.upper() for x in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"))}
+                    declared = current_credential_names(config) | parse_credential_names(
+                        os.environ.get(CREDENTIAL_NAME_MARKER))
+                    env = scrub_environment(os.environ, declared)
                     try:
                         code = await asyncio.to_thread(run_process, expand(tool["argv"], package, workspace, python), cwd=workspace, env=env,
                             input_file=request_file, output=temp / "output.json", error=temp / "stderr.log",

@@ -8,7 +8,8 @@ import pytest
 import yaml
 
 from agent_base.config import Config, validate_provider_selection
-from agent_base.engines import PatchLoader, dsh_patch
+from agent_base.engines import (CREDENTIAL_NAME_MARKER, PROVIDER_CREDENTIAL_ALIAS, PatchLoader, dsh_patch,
+                                 runtime_environment, scrub_environment)
 
 
 def write_config(tmp_path, *, providers="", provider="deepseek-official", model="fixture-model",
@@ -145,7 +146,10 @@ def test_dsh_patch_inserts_pi_ai_route_and_credentials_by_reference(tmp_path, mo
     # duplicated by a second inserted instance.
     pi_ai = next(row for row in rows if row.get("id") == "llm-pi-ai")
     profile = pi_ai["config"]["providers"]["internal-gateway"]
-    assert profile["apiKeyEnv"] == "FAKE_GATEWAY_API_KEY"
+    # The CLI holds the credential under the scrubbed alias, never the declared
+    # name, so dsh cannot pass it into business MCP child environments.
+    assert profile["apiKeyEnv"] == PROVIDER_CREDENTIAL_ALIAS
+    assert "FAKE_GATEWAY_API_KEY" not in text
     assert profile["baseURL"] == "https://llm.internal.example/v1"
     assert profile["models"][0]["contextWindow"] == 131072
     assert profile["models"][0]["reasoningEfforts"] == {"high": "high"}
@@ -153,7 +157,51 @@ def test_dsh_patch_inserts_pi_ai_route_and_credentials_by_reference(tmp_path, mo
                    for row in rows if "insert" in row for item in row["insert"])
     admin = next(item for row in rows if "insert" in row for item in row["insert"]
                  if item["id"] == "agent-base-admin")
-    assert "FAKE_GATEWAY_API_KEY" in admin["config"]["env"]
+    assert "FAKE_GATEWAY_API_KEY" not in admin["config"]["env"]
+    assert admin["config"]["env"][PROVIDER_CREDENTIAL_ALIAS].name == PROVIDER_CREDENTIAL_ALIAS
+
+
+def test_dsh_patch_tells_local_tools_which_credential_names_to_strip(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_GATEWAY_API_KEY", "secret")
+    configuration = Config.load(write_config(tmp_path, providers=GATEWAY,
+                                             provider="internal-gateway", model="internal-flash"))
+    package, workspace = tmp_path / "package", tmp_path / "workspace"
+    package.mkdir()
+    workspace.mkdir()
+    manifest = {"tools": {"local": [{"name": "demo", "argv": ["python", "demo.py"],
+                                     "input_schema": {"type": "object"}}]}}
+    patch = dsh_patch(configuration.runtime, tmp_path, package=package, workspace=workspace, manifest=manifest)
+    rows = yaml.load(patch.read_text(), Loader=PatchLoader)
+    tools = next(item for row in rows if "insert" in row for item in row["insert"]
+                 if item["id"] == "agent-base-local-tools")
+    assert tools["config"]["env"][CREDENTIAL_NAME_MARKER] == "FAKE_GATEWAY_API_KEY"
+
+
+def test_runtime_environment_moves_the_provider_credential_to_the_alias(monkeypatch):
+    runtime = {"engine": "dsh", "provider": "internal-gateway", "model": "internal-flash",
+               "providers": {"internal-gateway": {"api": "openai-completions",
+                                                  "base_url": "https://llm.internal.example/v1",
+                                                  "api_key_env": "ACCEPTANCE_LOGIN",
+                                                  "models": [{"id": "internal-flash"}]}}}
+    monkeypatch.setenv("ACCEPTANCE_LOGIN", "neutral-secret")
+    environment = runtime_environment(runtime, Path("/tmp/home"))
+    assert "ACCEPTANCE_LOGIN" not in environment
+    assert environment[PROVIDER_CREDENTIAL_ALIAS] == "neutral-secret"
+    # A repo-side process (service, install steps) gets no provider credential.
+    side = runtime_environment(runtime, Path("/tmp/home"), credential=False)
+    assert "ACCEPTANCE_LOGIN" not in side and PROVIDER_CREDENTIAL_ALIAS not in side
+
+
+def test_scrub_environment_removes_declared_names_and_keyword_habits():
+    values = {"ACCEPTANCE_LOGIN": "x", "GITHUB_TOKEN": "y", "PATH": "/bin",
+              PROVIDER_CREDENTIAL_ALIAS: "z", CREDENTIAL_NAME_MARKER: "ACCEPTANCE_LOGIN"}
+    named = scrub_environment(values, {"ACCEPTANCE_LOGIN"})
+    assert "ACCEPTANCE_LOGIN" not in named and "GITHUB_TOKEN" not in named
+    assert PROVIDER_CREDENTIAL_ALIAS not in named and CREDENTIAL_NAME_MARKER not in named
+    assert named["PATH"] == "/bin"
+    # Keyword habits alone cannot be the only defence: a neutral name needs the
+    # explicit declaration to be removed.
+    assert "ACCEPTANCE_LOGIN" in scrub_environment(values, set())
 
 
 def test_dsh_patch_fails_fast_when_credential_env_missing(tmp_path, monkeypatch):

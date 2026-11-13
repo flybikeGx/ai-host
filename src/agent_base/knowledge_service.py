@@ -52,7 +52,7 @@ class KnowledgeService:
                 file=self.root/'service-token';file.write_text(secrets.token_urlsafe(32));file.chmod(0o600)
             (self.root/'service.json').unlink(missing_ok=True)
             from .engines import runtime_environment
-            env=runtime_environment(self.config.runtime,self.root/'service-home')
+            env=runtime_environment(self.config.runtime,self.root/'service-home',credential=False)
             with (self.root/'service.log').open('ab') as log:
                 child=subprocess.Popen([sys.executable,'-m','agent_base.knowledge_server','--config',str(self.config.path)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,env=env,**spawn_options())
             birth=identity(child.pid)

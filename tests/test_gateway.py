@@ -118,7 +118,7 @@ def gateway():
     server.stop()
 
 
-def gateway_repo(repo: Path):
+def gateway_repo(repo: Path, credential_env: str):
     repo.mkdir(parents=True)
     (repo / "AGENTS.md").write_text("按任务调用 gateway_report 工具并交付 artifacts/gateway-report.txt。", encoding="utf-8")
     (repo / "tool_report.py").write_text(
@@ -129,7 +129,7 @@ def gateway_repo(repo: Path):
         "Path('artifacts').mkdir(exist_ok=True)\n"
         "Path('artifacts/gateway-report.txt').write_text('gateway tool output: ' + text, encoding='utf-8')\n"
         "print(json.dumps({'ok': True, 'received': text,"
-        " 'provider_credential_visible': 'FAKE_GATEWAY_API_KEY' in os.environ}))\n", encoding="utf-8")
+        f" 'provider_credential_visible': {credential_env!r} in os.environ}}))\n", encoding="utf-8")
     manifest = {"schema_version": 1,
                 "task": {"default": "调用 gateway_report 工具，text 参数 gateway-roundtrip，然后交付报告。"},
                 "tools": {"local": [{"name": "gateway_report", "argv": ["${runtime.python}", "${package.root}/tool_report.py"],
@@ -146,9 +146,13 @@ def gateway_repo(repo: Path):
 
 
 @requires_local_dsh
-def test_custom_provider_runs_real_dsh_through_local_gateway(tmp_path, gateway, monkeypatch):
-    monkeypatch.setenv("FAKE_GATEWAY_API_KEY", "fake-gateway-secret-do-not-log")
-    repo = gateway_repo(tmp_path / "repo")
+@pytest.mark.parametrize("credential_env", ["FAKE_GATEWAY_API_KEY", "ACCEPTANCE_LOGIN"],
+                         ids=["keyword-name", "neutral-name"])
+def test_custom_provider_runs_real_dsh_through_local_gateway(tmp_path, gateway, monkeypatch, credential_env):
+    # A neutral name (no KEY/TOKEN/SECRET/PASSWORD) is the regression that the
+    # keyword-only filters missed: isolation must follow the declared name.
+    monkeypatch.setenv(credential_env, "fake-gateway-secret-do-not-log")
+    repo = gateway_repo(tmp_path / "repo", credential_env)
     file = tmp_path / "config.toml"
     file.write_text(
         '[storage]\nroot = "data"\n[queue]\nmax_concurrent = 1\n[runtime]\n'
@@ -156,7 +160,7 @@ def test_custom_provider_runs_real_dsh_through_local_gateway(tmp_path, gateway, 
         'provider = "internal-gateway"\nmodel = "internal-flash"\neffort = "high"\n'
         'timeout_seconds = 240\npermission_mode = "workspace-write"\napproval_policy = "never"\n\n'
         f'[providers.internal-gateway]\napi = "openai-completions"\nbase_url = "{gateway.url}"\n'
-        'api_key_env = "FAKE_GATEWAY_API_KEY"\n\n'
+        f'api_key_env = "{credential_env}"\n\n'
         '[[providers.internal-gateway.models]]\nid = "internal-flash"\ncontext_window = 131072\n'
         '[providers.internal-gateway.models.reasoning_efforts]\nhigh = "high"\n', encoding="utf-8")
     configuration = Config.load(file)
@@ -173,8 +177,8 @@ def test_custom_provider_runs_real_dsh_through_local_gateway(tmp_path, gateway, 
                          if any(message.get("role") == "tool" for message in request.get("messages", [])))
     tool_messages = [message for message in continuation["messages"] if message.get("role") == "tool"]
     assert any("gateway-roundtrip" in json.dumps(message, ensure_ascii=False) for message in tool_messages)
-    # The business tool never sees the provider credential (name-filtered env);
-    # its own JSON output is embedded as a content string.
+    # The business tool never sees the declared provider credential, whatever
+    # its name; its own JSON output is embedded as a content string.
     assert any('"provider_credential_visible": false' in str(message.get("content")) for message in tool_messages)
     # Structured report and archived artifact prove the loop really completed.
     assert final["result"]["agent_report"]["status"] == "completed"
@@ -190,3 +194,5 @@ def test_custom_provider_runs_real_dsh_through_local_gateway(tmp_path, gateway, 
     patch = (root / "runtime.patch.yml").read_text(encoding="utf-8")
     assert "llm-pi-ai" in patch and "internal-gateway" in patch
     assert "fake-gateway-secret-do-not-log" not in patch
+    # Only environment variable names may appear; the alias carries the value.
+    assert "apiKeyEnv: " + "AGENT_BASE_PROVIDER_API_KEY" in patch

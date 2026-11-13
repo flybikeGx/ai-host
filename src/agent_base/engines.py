@@ -92,6 +92,45 @@ def provider_credential_env(runtime: dict) -> str | None:
     return definition.get("api_key_env") if definition else None
 
 
+# The dsh LLM process must hold the selected credential, while every child it
+# spawns (business MCP servers, tool processes) must not. dsh only scrubs child
+# environments by name heuristics (/KEY|PASSWORD|SECRET|TOKEN/i), so a declared
+# name such as `INTERNAL_LOGIN` would pass through. Handing the value to dsh
+# under a fixed keyword name and removing the declared name closes that path;
+# the same alias is what the admin MCP subprocess receives.
+PROVIDER_CREDENTIAL_ALIAS = "AGENT_BASE_PROVIDER_API_KEY"
+CREDENTIAL_NAME_MARKER = "AGENT_BASE_CREDENTIAL_ENV_NAMES"
+CREDENTIAL_KEYWORDS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD")
+BUILTIN_CREDENTIAL_ENVS = {"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"}
+
+
+def declared_credential_names(runtime: dict) -> set[str]:
+    """Credential env names declared by any provider in this runtime snapshot."""
+    return {definition["api_key_env"] for definition in (runtime.get("providers") or {}).values()
+            if definition.get("api_key_env")}
+
+
+def provider_credential_names(runtime: dict) -> set[str]:
+    """Every name that can carry a model provider credential for this runtime."""
+    return declared_credential_names(runtime) | BUILTIN_CREDENTIAL_ENVS | {PROVIDER_CREDENTIAL_ALIAS}
+
+
+def parse_credential_names(value: str | None) -> set[str]:
+    return {name for name in (value or "").split(",") if name}
+
+
+def credential_name_marker(runtime: dict) -> str | None:
+    names = declared_credential_names(runtime)
+    return ",".join(sorted(names)) if names else None
+
+
+def scrub_environment(values: dict, names=(), *, keywords: bool = True) -> dict:
+    """Copy values without declared provider credentials (and optionally keyword secrets)."""
+    blocked = {name for name in names if name} | {PROVIDER_CREDENTIAL_ALIAS, CREDENTIAL_NAME_MARKER}
+    return {key: value for key, value in values.items()
+            if key not in blocked and not (keywords and any(word in key.upper() for word in CREDENTIAL_KEYWORDS))}
+
+
 def dsh_patch(runtime: dict, root: Path, *, package: Path | None = None,
               workspace: Path | None = None, manifest: dict | None = None,
               python: str = sys.executable, admin_config: Path | None = None) -> Path:
@@ -99,9 +138,10 @@ def dsh_patch(runtime: dict, root: Path, *, package: Path | None = None,
     selected = runtime.get("provider", "deepseek-official")
     if selected in providers:
         # Fail fast in the process that spawns the CLI; the same environment
-        # is what the adapter resolves the reference from.
+        # is what the adapter resolves the reference from. A run started by the
+        # admin MCP only carries the alias, so accept either name here.
         credential_env = providers[selected].get("api_key_env")
-        if credential_env and not os.environ.get(credential_env):
+        if credential_env and not (os.environ.get(credential_env) or os.environ.get(PROVIDER_CREDENTIAL_ALIAS)):
             raise ValueError(f"缺少 provider 凭据环境变量：{credential_env}（只设置环境变量，不写入配置）")
     rows = [{"id": "agent-default-model", "config": {
         "provider": selected, "model": runtime["model"],
@@ -113,15 +153,19 @@ def dsh_patch(runtime: dict, root: Path, *, package: Path | None = None,
         # (dsh-base entry `llm-pi-ai`); configuring that entry registers the
         # routes. Inserting a second instance would duplicate the catalog and
         # fail with "configurable provider ... is already declared".
-        rows.append({"id": "llm-pi-ai", "config": {
-            "providers": {name: pi_ai_profile(definition) for name, definition in providers.items()}}})
+        profiles = {name: pi_ai_profile(definition) for name, definition in providers.items()}
+        if selected in profiles and profiles[selected].get("apiKeyEnv"):
+            # The alias, not the declared name, is what the CLI process holds.
+            profiles[selected]["apiKeyEnv"] = PROVIDER_CREDENTIAL_ALIAS
+        rows.append({"id": "llm-pi-ai", "config": {"providers": profiles}})
     if admin_config:
         admin_env = {"PYTHONPATH": str(Path(__file__).resolve().parents[1])}
-        credential_names = {"DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
-        credential_env = provider_credential_env(runtime)
-        if credential_env:
-            credential_names.add(credential_env)
-        for name in sorted(credential_names):
+        if provider_credential_env(runtime):
+            # The admin MCP is an authorized process: it receives the selected
+            # credential (under the alias) so it can start runs of its own.
+            # The CLI it serves always has this alias after runtime_environment.
+            admin_env[PROVIDER_CREDENTIAL_ALIAS] = JsEnvironment(PROVIDER_CREDENTIAL_ALIAS)
+        for name in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
             if os.environ.get(name):
                 admin_env[name] = JsEnvironment(name)
         rows.append({"id": "agent-instructions", "config": {"maxBytes": 65536, "projectRootMarkers": [".agent-base-root"]}})
@@ -132,10 +176,15 @@ def dsh_patch(runtime: dict, root: Path, *, package: Path | None = None,
             "startupTimeoutMs": 30000, "failOnStartupError": True}})
     if manifest and package and workspace:
         if manifest.get("tools", {}).get("local"):
+            tool_env = {"PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+            marker = credential_name_marker(runtime)
+            if marker:
+                # Declared names only; the tool process strips them itself.
+                tool_env[CREDENTIAL_NAME_MARKER] = marker
             inserts.append({"id": "agent-base-local-tools", "name": "@deepseek-ai/dsh-mcp-client", "config": {
                 "serverName": "local", "transport": "stdio", "command": sys.executable,
                 "args": ["-m", "agent_base.mcp_server", "--package", str(package), "--workspace", str(workspace), "--python", python],
-                "env": {"PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+                "env": tool_env,
                 "startupTimeoutMs": 30000, "failOnStartupError": True}})
         for server in manifest.get("mcp", {}).get("servers", []):
             config = {"serverName": server["id"], "transport": "streamable-http" if server["transport"] == "streamable_http" else "stdio",
@@ -163,7 +212,7 @@ def dsh_command(runtime: dict, patch: Path, *, session_id: str | None = None, ex
     return [*args, "-"]
 
 
-def runtime_environment(runtime: dict, home: Path) -> dict:
+def runtime_environment(runtime: dict, home: Path, *, credential: bool = True) -> dict:
     env = dict(os.environ)
     # Make the package importable in child MCP/runner processes, including before
     # a user has installed the project in editable mode.
@@ -175,8 +224,30 @@ def runtime_environment(runtime: dict, home: Path) -> dict:
     if runtime.get("engine", "dsh") == "dsh":
         env.update(DSH_HOME=str(home), DSH_AGENTS_HOME=str(home / "agents"), DSH_TELEMETRY_DISABLED="1",
                    DSH_PERMISSION_MODE=runtime.get("permission_mode", "workspace-write"))
-    elif runtime.get("config_dir"):
-        env["CODEAGENT3_CONFIG_DIR"] = str(Path(runtime["config_dir"]).expanduser().resolve())
+        # Remove every declared credential name from the CLI environment and
+        # hand the selected value over under the scrubbed alias. Children of the
+        # CLI (business MCP servers and tools) therefore never inherit it, while
+        # the LLM adapter still resolves its reference.
+        selected = provider_credential_env(runtime)
+        value = None
+        if credential and selected:
+            value = env.pop(selected, None)
+            if value is None:
+                value = env.pop(PROVIDER_CREDENTIAL_ALIAS, None)
+        blocked = declared_credential_names(runtime) | {PROVIDER_CREDENTIAL_ALIAS}
+        if not credential:
+            blocked = provider_credential_names(runtime)
+        for name in blocked:
+            env.pop(name, None)
+        if value:
+            env[PROVIDER_CREDENTIAL_ALIAS] = value
+    else:
+        # CodeAgent authenticates through its own configuration; declared model
+        # provider credentials are never part of its environment.
+        if runtime.get("config_dir"):
+            env["CODEAGENT3_CONFIG_DIR"] = str(Path(runtime["config_dir"]).expanduser().resolve())
+        for name in provider_credential_names(runtime):
+            env.pop(name, None)
     return env
 
 

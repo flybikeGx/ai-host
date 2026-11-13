@@ -14,7 +14,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .config import Config, validate_selection
-from .engines import codeagent_command, dsh_command, dsh_patch, parse_dsh_output, runtime_environment
+from .engines import (codeagent_command, dsh_command, dsh_patch, parse_dsh_output, provider_credential_names,
+                      runtime_environment, scrub_environment)
 from .package import build_prompt, expand, freeze, instruction_hashes, within, load_package, resolve_task
 from .reports import parse_agent_report, write_run_report
 from .processes import Cancelled, DeadlineExceeded, alive, identity, kill_tree, run_process, spawn_options
@@ -161,6 +162,10 @@ class Service:
         spec = job["spec"]
         runtime = spec["runtime"]
         env = runtime_environment(runtime, root / "dsh-home")
+        # Git, uv, installation steps and completion checks are repo code; keep
+        # the model provider credential out of them while preserving the rest of
+        # the environment they may legitimately need.
+        process_env = scrub_environment(env, provider_credential_names(runtime), keywords=False)
         temporary = None
         result = {"report_path": str(root / "report.json"), "verification": "not_verified"}
         try:
@@ -199,7 +204,7 @@ class Service:
             def command(args, label, *, cwd=workspace, timeout=None, command_env=None):
                 until = min(deadline, time.time() + timeout) if timeout else deadline
                 self.store.event(run_id, "process.started", {"label": label})
-                code = run_process(args, cwd=cwd, env=command_env or env, output=root / f"{label}.stdout.log", error=root / f"{label}.stderr.log",
+                code = run_process(args, cwd=cwd, env=command_env or process_env, output=root / f"{label}.stdout.log", error=root / f"{label}.stderr.log",
                                    deadline=until, cancelled=cancel, on_started=lambda pid, birth: self.store.update(run_id, process_pid=pid, process_birth=birth), on_poll=heartbeat)
                 self.store.update(run_id, process_pid=None, process_birth=None)
                 self.store.event(run_id, "process.finished", {"label": label, "exit_code": code})
@@ -211,7 +216,7 @@ class Service:
                 repositories = Repositories(self.config)
                 installation_id = spec.get("installation_id")
                 if not installation_id:
-                    git_env = {**env, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1"}
+                    git_env = {**process_env, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1"}
                     command(["git", "-c", "core.hooksPath=" + os.devnull, "clone", "--no-local", "--no-checkout", "--", spec["repo"], str(workspace)],
                             "clone", cwd=root, command_env=git_env)
                     ref = spec.get("ref") or "HEAD"
@@ -244,7 +249,7 @@ class Service:
                     if manifest.get("environment", {}).get("lockfile"):
                         if not shutil.which("uv"):
                             raise ValueError("安装需要预先配置 uv")
-                        install_env = {**env, "UV_PROJECT_ENVIRONMENT": str(root / "env"), "UV_CACHE_DIR": str(self.config.data / "uv-cache")}
+                        install_env = {**process_env, "UV_PROJECT_ENVIRONMENT": str(root / "env"), "UV_CACHE_DIR": str(self.config.data / "uv-cache")}
                         command(["uv", "sync", "--frozen", "--no-dev", "--project", str(root / "package")], "dependencies", cwd=root, command_env=install_env)
                     python = str(root / "env" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")) if (root / "env").exists() else sys.executable
                     for i, step in enumerate(manifest.get("installation", {}).get("steps", [])):

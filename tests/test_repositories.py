@@ -216,3 +216,93 @@ def test_service_recovery_stops_after_three_failures(repositories, resource_repo
         repositories.recover()
     assert len(calls) == 3
     assert repositories.get(item["id"])["restart_attempts"] == 3
+
+def test_v2_local_tool_env_excludes_declared_provider_credential(config, repositories, resource_repos, monkeypatch, tmp_path):
+    # The credential is declared under a neutral name (no KEY/TOKEN keyword), so
+    # keyword-only scrubbing would leak it into the persistent repo gateway's
+    # business tool. Isolation must follow the declared provider definition.
+    monkeypatch.setenv("ACCEPTANCE_LOGIN", "neutral-secret-do-not-log")
+    config.runtime["provider"] = "internal-gateway"
+    config.runtime["providers"] = {"internal-gateway": {
+        "api": "openai-completions", "base_url": "https://llm.internal.example/v1",
+        "api_key_env": "ACCEPTANCE_LOGIN", "models": [{"id": "internal-flash"}]}}
+    repo = resource_repos["finance"]
+    (repo / "tools/probe_credential.py").write_text(
+        "import json, os, sys\n"
+        "json.load(sys.stdin)\n"
+        "print(json.dumps({'ok': True, 'neutral_visible': 'ACCEPTANCE_LOGIN' in os.environ,\n"
+        "                  'builtin_visible': 'DEEPSEEK_API_KEY' in os.environ}))\n", encoding='utf-8')
+    installation = repo / "Installation.md"
+    text = installation.read_text(encoding='utf-8')
+    tool = ("    - name: probe_credential\n"
+            "      description: 报告业务工具环境是否包含 provider 凭据。\n"
+            "      argv: [\"${runtime.python}\", \"${package.root}/tools/probe_credential.py\"]\n"
+            "      input_schema:\n"
+            "        type: object\n"
+            "        properties: {}\n"
+            "        additionalProperties: false\n")
+    assert "completion:" in text
+    installation.write_text(text.replace("completion:", tool + "completion:", 1), encoding='utf-8')
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "probe credential"], check=True)
+    item = repositories.install(str(repo))
+    workspace = tmp_path / "run-workspace"
+    (workspace / "artifacts").mkdir(parents=True)
+    job = repositories.store.create({"installation_id": item["id"]})
+    repositories.store.update(job["id"], status="running", workspace=str(workspace), deadline=time.time() + 15)
+    async def exercise():
+        async with httpx.AsyncClient(headers=repositories.headers(item, job["id"]), trust_env=False) as client:
+            async with streamable_http_client(item["endpoint"], http_client=client) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    answer = await session.call_tool("probe_credential", {})
+                    assert not answer.isError, answer.content
+                    payload = json.loads(answer.content[0].text)
+                    assert payload["neutral_visible"] is False
+                    assert payload["builtin_visible"] is False
+    asyncio.run(exercise())
+    repositories.store.update(job["id"], status="cancelled")
+
+def test_long_lived_gateway_strips_credentials_declared_after_start(config, repositories, resource_repos,
+                                                                   monkeypatch, tmp_path):
+    # The repo service can start before the provider definition exists. A later
+    # Run must still not expose that credential to business tools, so the
+    # gateway reloads declared names for every call.
+    monkeypatch.setenv("LATE_LOGIN", "neutral-secret-do-not-log")
+    repo = resource_repos["finance"]
+    (repo / "tools/probe_credential.py").write_text(
+        "import json, os, sys\n"
+        "json.load(sys.stdin)\n"
+        "print(json.dumps({'ok': True, 'late_visible': 'LATE_LOGIN' in os.environ}))\n", encoding='utf-8')
+    installation = repo / "Installation.md"
+    text = installation.read_text(encoding='utf-8')
+    tool = ("    - name: probe_credential\n"
+            "      description: 报告业务工具环境是否包含 provider 凭据。\n"
+            "      argv: [\"${runtime.python}\", \"${package.root}/tools/probe_credential.py\"]\n"
+            "      input_schema:\n"
+            "        type: object\n"
+            "        properties: {}\n"
+            "        additionalProperties: false\n")
+    installation.write_text(text.replace("completion:", tool + "completion:", 1), encoding='utf-8')
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "late probe"], check=True)
+    item = repositories.install(str(repo))
+    config.path.write_text(config.path.read_text(encoding='utf-8') +
+                           '\n[providers.late]\napi="openai-completions"\nbase_url="https://llm.internal.example/v1"\n'
+                           'api_key_env="LATE_LOGIN"\n\n[[providers.late.models]]\nid="late-model"\n', encoding='utf-8')
+    workspace = tmp_path / "late-workspace"
+    (workspace / "artifacts").mkdir(parents=True)
+    job = repositories.store.create({"installation_id": item["id"]})
+    repositories.store.update(job["id"], status="running", workspace=str(workspace), deadline=time.time() + 15)
+    async def exercise():
+        async with httpx.AsyncClient(headers=repositories.headers(item, job["id"]), trust_env=False) as client:
+            async with streamable_http_client(item["endpoint"], http_client=client) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    answer = await session.call_tool("probe_credential", {})
+                    assert not answer.isError, answer.content
+                    assert json.loads(answer.content[0].text)["late_visible"] is False
+    asyncio.run(exercise())
+    repositories.store.update(job["id"], status="cancelled")

@@ -17,6 +17,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from .config import Config
+from .engines import CREDENTIAL_NAME_MARKER, parse_credential_names, scrub_environment
 from .package import expand, within
 from .processes import run_process
 from .review import REVIEW_DOCUMENTS
@@ -172,7 +173,7 @@ async def serve(args):
                     request = temp / "input.json"
                     request.write_text(json.dumps({"protocol_version": 1, "arguments": arguments,
                         "context": {"workspace": str(workspace), "artifact_dir": str(workspace / "artifacts")}}), encoding="utf-8")
-                    env = {k: v for k, v in os.environ.items() if not any(x in k.upper() for x in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"))}
+                    env = scrub_environment(os.environ, parse_credential_names(os.environ.get(CREDENTIAL_NAME_MARKER)))
                     cancelled = threading.Event()
                     try:
                         code = await asyncio.to_thread(run_process, expand(tool["argv"], package, workspace, args.python),
