@@ -107,6 +107,12 @@ def main():
     start.add_argument("--task")
     chat_turn = commands.add_parser("_chat_execute", help=argparse.SUPPRESS)
     chat_turn.add_argument("turn_id")
+    oss_mock = commands.add_parser("oss-mock", help="启动本地模拟 OSS 统一登录服务（I-4 验证）")
+    oss_mock.add_argument("--port", type=int, default=8890)
+    mcp_mock = commands.add_parser("mcp-mock", help="启动本地模拟 MCP 服务器（网关验证）")
+    mcp_mock.add_argument("--port", type=int, default=8891)
+    knowledge_mock = commands.add_parser("knowledge-mock", help="启动本地模拟知识库 MCP 服务（网关验证）")
+    knowledge_mock.add_argument("--port", type=int, default=8892)
     serve = commands.add_parser("serve", help="启动本地 Web API/UI 和调度器")
     serve.add_argument("--port", type=int, default=8765)
     worker = commands.add_parser("worker", help="运行持久化队列和 cron 调度，无 Web")
@@ -220,6 +226,21 @@ def main():
             import uvicorn
             from .web import create_app
             uvicorn.run(create_app(config), host="127.0.0.1", port=args.port)
+            return
+        if args.action == "oss-mock":
+            import uvicorn
+            from .mocks.oss import create_app
+            uvicorn.run(create_app(), host="127.0.0.1", port=args.port)
+            return
+        if args.action == "mcp-mock":
+            import uvicorn
+            from .mocks.mcp import echo_http_app
+            uvicorn.run(echo_http_app(), host="127.0.0.1", port=args.port)
+            return
+        if args.action == "knowledge-mock":
+            import uvicorn
+            from .mocks.knowledge import knowledge_http_app
+            uvicorn.run(knowledge_http_app(), host="127.0.0.1", port=args.port)
             return
         if args.action in {"work", "worker"}:
             from .scheduler import Scheduler

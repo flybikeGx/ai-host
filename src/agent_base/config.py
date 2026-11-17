@@ -119,6 +119,7 @@ class Config:
     runtime: dict = field(default_factory=dict)
     max_concurrent: int = 2
     guardian: dict = field(default_factory=dict)
+    oss: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, filename: str | Path | None = None) -> "Config":
@@ -146,7 +147,8 @@ class Config:
         if not isinstance(timeout, (int, float)) or not 1 <= timeout <= 86400:
             raise ValueError("timeout_seconds 必须在 1–86400 之间")
         guardian = _parse_guardian(raw.get("guardian", {}))
-        return cls(path, data, runtime, cap, guardian)
+        oss = _parse_oss(raw.get("oss", {}))
+        return cls(path, data, runtime, cap, guardian, oss=oss)
 
 
 def _parse_guardian(raw) -> dict:
@@ -168,6 +170,23 @@ def _parse_guardian(raw) -> dict:
             raise ValueError("guardian.timeout_seconds 必须在 60–86400 之间")
         result["timeout_seconds"] = raw["timeout_seconds"]
     return result
+
+
+def _parse_oss(raw) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError("oss 必须是表")
+    unknown = set(raw) - {"endpoint"}
+    if unknown:
+        raise ValueError(f"oss 包含不支持的字段：{sorted(unknown)}")
+    endpoint = os.environ.get("AGENT_BASE_OSS_ENDPOINT") or raw.get("endpoint")
+    if endpoint is None:
+        return {}
+    if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
+        raise ValueError("oss.endpoint 必须是 HTTP(S) 端点")
+    parsed = urlparse(endpoint)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.netloc:
+        raise ValueError("oss.endpoint 不得包含凭据、查询或片段")
+    return {"endpoint": endpoint.rstrip("/")}
 
 
 def validate_selection(runtime: dict):

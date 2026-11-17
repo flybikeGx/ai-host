@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT, api_key_hash TEXT, display_name TEXT NOT NULL DEFAULT '',
     user_type TEXT NOT NULL DEFAULT 'person', status TEXT NOT NULL DEFAULT 'active',
     home_domain_id TEXT, mfa_enabled INTEGER NOT NULL DEFAULT 0,
+    huawei_w3account TEXT,
     failed_count INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0,
     created REAL NOT NULL, updated REAL NOT NULL
 );
@@ -159,7 +160,19 @@ class ControlStore:
         self.db = root / "control.sqlite"
         with self.connection() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
         self._seed_builtins()
+
+    def _migrate(self, conn):
+        """增量迁移：为既有 control.sqlite 补列，避免 CREATE IF NOT EXISTS 不生效。
+
+        唯一约束用独立索引而非列内 UNIQUE——SQLite 的 ``ALTER TABLE ADD COLUMN``
+        不允许带 UNIQUE，且与内联约束等价。
+        """
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "huawei_w3account" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN huawei_w3account TEXT")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_w3account ON users(huawei_w3account)")
 
     @contextmanager
     def connection(self):
@@ -241,7 +254,7 @@ class ControlStore:
     # ---- 用户 ----
     def create_user(self, username: str, *, password: str | None = None, api_key: str | None = None,
                     email: str | None = None, display_name: str = "", user_type: str = "person",
-                    home_domain_id: str | None = None) -> dict:
+                    home_domain_id: str | None = None, huawei_w3account: str | None = None) -> dict:
         if user_type not in {"person", "service"}:
             raise ValueError("user_type 只支持 person / service")
         now = time.time()
@@ -250,12 +263,12 @@ class ControlStore:
             try:
                 conn.execute(
                     "INSERT INTO users(id,username,email,password_hash,api_key_hash,display_name,user_type,status,"
-                    "home_domain_id,mfa_enabled,failed_count,locked_until,created,updated)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,0,0,0,?,?)",
+                    "home_domain_id,mfa_enabled,huawei_w3account,failed_count,locked_until,created,updated)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)",
                     (user_id, username, email, password, api_key, display_name, user_type, "active",
-                     home_domain_id, now, now))
+                     home_domain_id, huawei_w3account, now, now))
             except sqlite3.IntegrityError:
-                raise ValueError(f"用户名或邮箱已存在：{username}")
+                raise ValueError(f"用户名、邮箱或工号已存在：{username}")
         return self.get_user(user_id)
 
     def list_users(self) -> list[dict]:
@@ -277,8 +290,14 @@ class ControlStore:
             row = conn.execute("SELECT * FROM users WHERE api_key_hash=?", (key_hash,)).fetchone()
         return dict(row) if row else None
 
+    def get_user_by_w3account(self, w3account: str) -> dict | None:
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM users WHERE huawei_w3account=?", (w3account,)).fetchone()
+        return dict(row) if row else None
+
     def update_user(self, user_id: str, **fields) -> dict:
-        allowed = {"display_name", "status", "email", "home_domain_id", "password_hash", "failed_count", "locked_until"}
+        allowed = {"display_name", "status", "email", "home_domain_id", "password_hash",
+                   "huawei_w3account", "failed_count", "locked_until"}
         if not fields or set(fields) - allowed:
             raise ValueError("无效用户字段")
         fields["updated"] = time.time()

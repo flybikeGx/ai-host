@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from . import auth
+from .oss import OssAuth
 from .rbac import check, effective_permissions
 from .store import ControlStore
 
@@ -38,6 +39,7 @@ class Governance:
         self.config = config
         self.store = ControlStore(config.data)
         self._secret = _load_secret(config.data)
+        self.oss = OssAuth(config.oss["endpoint"]) if config.oss.get("endpoint") else None
 
     # ---- 引导 ----
     def bootstrap(self, admin_password: str | None = None) -> dict:
@@ -78,6 +80,48 @@ class Governance:
         if user["status"] != "active":
             raise ValueError("账号不可用")
         return self._issue_session(user)
+
+    def login_with_oss(self, token: str) -> dict:
+        """企业内网账号（OSS）验证登录：token → 工号回查 → 映射/建号 → 签发 JWT。
+
+        首次自动建号为低权 ``viewer``（域内），管理员后续复核提权（I-4）。
+        """
+        if self.oss is None:
+            raise ValueError("未配置 OSS 企业账号登录端点")
+        identity = self.oss.verify(token)
+        w3account = identity["w3account"]
+        user = self.store.get_user_by_w3account(w3account)
+        first_login = False
+        if user is None:
+            user = self._auto_provision(w3account, identity)
+            first_login = True
+        if user["status"] == "disabled":
+            raise ValueError("账号已停用")
+        if user["status"] == "locked" and user["locked_until"] > time.time():
+            raise ValueError("账号已锁定，请稍后再试")
+        self.store.audit(domain_id=user["home_domain_id"], user_id=user["id"], trace_id=None,
+                         level="gateway", action="auth.oss_login",
+                         detail={"w3account": w3account, "first_login": first_login,
+                                 "department": identity.get("department", ""),
+                                 "region": identity.get("region", "")})
+        return self._issue_session(user)
+
+    def _auto_provision(self, w3account: str, identity: dict) -> dict:
+        """首次工号自动建号：person + 默认域 viewer（最低权）。"""
+        domains = self.store.list_domains()
+        if not domains:
+            raise ValueError("未初始化默认域")
+        domain_id = domains[0]["id"]
+        username = w3account
+        if self.store.get_user_by_username(username) is not None:
+            username = f"{w3account}@oss"
+        user = self.store.create_user(username, user_type="person", huawei_w3account=w3account,
+                                      display_name=identity.get("department", ""),
+                                      home_domain_id=domain_id)
+        role = self.store.get_role_by_name("viewer")
+        self.store.grant_role(user["id"], role["id"], domain_id=domain_id, granted_by="system")
+        self.store.add_membership(user["id"], domain_id)
+        return user
 
     def _issue_session(self, user: dict) -> dict:
         payload = {

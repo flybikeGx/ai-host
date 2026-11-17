@@ -231,7 +231,7 @@ flowchart TB
 
 ## 13. 治理层（多用户分权分域）
 
-> 状态：**身份/RBAC 骨架已实现**（`governance/` 包 + `/api/v1` + CLI `control`）；网关、注册中心、资源、执行配额、每域独立实例强隔离仍属设计愿景（见 §18.4）。
+> 状态：**身份/RBAC 骨架 + 企业内网账号验证（OSS）已实现**（`governance/` 包 + `/api/v1` + CLI `control`/`oss-mock`/`mcp-mock`/`knowledge-mock`，模拟服务在独立 `mocks/` 包）；网关、注册中心、资源、执行配额、每域独立实例强隔离仍属设计愿景（见 §18.4）。
 > 定位：把单用户执行基座补足为多用户分权分域的治理平台。执行引擎原样复用，治理层只新增治理语义，为后续在页面上做用户/权限管理、以及每域独立实例的强隔离铺路。本节整合并取代早前的治理层设计草案。
 
 ### 13.1 关系与关键裁决
@@ -251,12 +251,18 @@ flowchart TB
 | `governance/store.py` | `ControlStore`：独立 `control.sqlite`（domains/users/roles/permissions/role_permissions/user_domains/user_roles/user_permissions/groups/audit_log）；种子 22 权限 + 6 内置角色（platform_admin/auditor/domain_admin/developer/viewer/service_runner）+ 默认域 |
 | `governance/auth.py` | pbkdf2_sha256 密码哈希、API key 哈希、HMAC-SHA256 签名令牌（`payload.sig`，claims 只放身份） |
 | `governance/rbac.py` | 有效权限 = 角色并集 ∪ 直授 allow − 直授 deny（**deny 优先**）；域/组作用域收窄（NULL=全局/全组） |
-| `governance/service.py` | `Governance` 门面：密钥管理、bootstrap、登录（口令/API key）、域/用户/角色/分组/成员/授权 CRUD、审计、`authorize` |
-| `governance/web.py` | `/api/v1` 路由 + JWT 依赖 + 权限门控（`x-domain-id` 定域）：auth/login、auth/api-key、me、permissions、domains、users、roles、groups、memberships、grants、audit |
+| `governance/service.py` | `Governance` 门面：密钥管理、bootstrap、登录（口令/API key/企业 OSS 账号）、域/用户/角色/分组/成员/授权 CRUD、审计、`authorize`；`login_with_oss`（token → 工号回查 → 首次自动建号低权 viewer → 签发 JWT） |
+| `governance/oss.py` | `OssAuth` 客户端：`verify(token)` 把 OSS 签发的 token 透传给 `POST {endpoint}/auth/getUserDetail`（`X-Auth-Token`）回查 `{w3account, department, region}`；密码不经平台 |
+| `governance/web.py` | `/api/v1` 路由 + JWT 依赖 + 权限门控（`x-domain-id` 定域）：auth/login、auth/oss、auth/api-key、me、permissions、domains、users、roles、groups、memberships、grants、audit |
+| `mocks/oss.py` | 本地模拟 OSS 统一登录 REST（I-4 验证）：`/auth/login`（工号+密码换 token）、`/auth/getUserDetail`（凭 `X-Auth-Token` 回查）、`/health`；演示工号 `w000001/2/3` |
+| `mocks/mcp.py` | 模拟通用 MCP 服务器（`echo`/`add`），streamable-http（remote）/stdio（embedded）双模，验证网关统一调用与反向代理 |
+| `mocks/knowledge.py` | 模拟知识库 MCP（`knowledge_catalog/search/read/submit`），契约对齐真实 `knowledge_mcp.py`，验证知识库经注册表接入网关 |
 | `cli.py::control` | `init`（引导 admin）/ users / roles / domains / permissions / audit |
+| `cli.py::{oss-mock,mcp-mock,knowledge-mock}` | 启动对应模拟服务（`--port` 默认 8890/8891/8892） |
 
 - **零新依赖**：仅 stdlib `sqlite3` + `hashlib/hmac`，不引入 SQLAlchemy/PyJWT/passlib。
 - **非侵入**：独立 `control.sqlite`、独立 `/api/v1`、独立令牌，不触碰既有 `/api/*`（仍走 `AGENT_BASE_WEB_TOKEN`）与单用户执行逻辑。
+- **模拟服务解耦**：`mocks/` 是独立子包，承载 OSS / MCP / 知识库三个可独立运行的假服务，仅供本地端到端验证，不与生产代码（`governance`/`registry`/`gateway`）耦合。
 
 ### 13.3 关键设计决策
 
@@ -266,7 +272,7 @@ flowchart TB
 
 ### 13.4 融合接缝与愿景
 
-首版只落地「身份与权限」，与执行层的耦合面为：**控制面 API**（`/api/v1/*`）、**实例注册/发现**（`workspace_id↔domain_id↔实例` 绑定）、**执行契约**（`submit(task)` → run_id + 状态流，复用 `agent-report-v1.schema.json`）、**审计 trace_id 传播**（网关级/Agent 级同一 trace_id 关联双层）、**鉴权/身份注入**（实例二次校验 workspace 绑定，用户 token 不透传 CLI/MCP）。网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、企业内网账号验证、每域独立实例执行强隔离等接缝随愿景阶段实施（§18.4）。
+首版落地「身份与权限 + 企业内网账号验证」，与执行层的耦合面为：**控制面 API**（`/api/v1/*`）、**实例注册/发现**（`workspace_id↔domain_id↔实例` 绑定）、**执行契约**（`submit(task)` → run_id + 状态流，复用 `agent-report-v1.schema.json`）、**审计 trace_id 传播**（网关级/Agent 级同一 trace_id 关联双层）、**鉴权/身份注入**（实例二次校验 workspace 绑定，用户 token 不透传 CLI/MCP）。网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、每域独立实例执行强隔离等接缝随愿景阶段实施（§18.4）。
 
 ## 14. 数据模型与存储布局
 
@@ -296,6 +302,7 @@ flowchart TB
 | per-run grant | dsh patch 环境（`AGENT_BASE_SERVICE_*_AUTH`） | Bearer；哈希存储 | 解绑/撤销发布即删 |
 | 会话 grant（新） | 外部客户端（签发响应一次性获得） | Bearer | 解绑即时 / TTL 到期 |
 | 知识库 grant | 同上两种来源 | Bearer | `revoke_actor` / 绑定停用 |
+| OSS 登录 token | OSS 侧签发，平台只在登录时透传 | `X-Auth-Token`（仅回查，不落盘） | OSS token 过期（TTL）/ OSS 侧吊销 |
 
 边界声明：既有 Web API 是本机管理面（loopback + 可选 token）；治理层 `/api/v1`（§13）提供身份/RBAC 数据面，但不是执行隔离——目录/venv/命名空间不是安全沙箱，名称过滤不是恶意代码防护。多用户执行强隔离仍暂缓（方向：每用户独立实例 + 容器执行边界）。
 
@@ -356,7 +363,7 @@ flowchart TB
 
 多用户与用户隔离（既定方向为独立实例 + 容器执行边界）；集群高可用、多租户强隔离、服务市场、自建授权服务器。
 
-治理层进展：身份/RBAC/域骨架已实现（§13）；网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、企业内网账号验证、每域独立实例执行强隔离仍暂缓。
+治理层进展：身份/RBAC/域骨架 + 企业内网账号验证（OSS）已实现（§13）；网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、每域独立实例执行强隔离仍暂缓。
 
 ## 19. 关键设计决策记录
 

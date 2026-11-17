@@ -1,7 +1,7 @@
 # 治理层设计（多用户分权分域 · 网关 · 执行编排）
 
 > 状态：设计草案 v0.2（待评审）
-> 更新日期：2026-11-17
+> 更新日期：2026-11-18
 > 定位：本文设计 agent-base 的「治理层」——把当前单用户执行基座补足为多用户分权分域的治理平台，并列出需要实现的点与需要融合的地方。
 > 前置文档（本仓库）：`DESIGN.md`（执行基座基线）、`USER_ISOLATION_DESIGN.md`（多用户隔离草案，已搁置）、`RepoContract.md`（执行契约）、`KNOWLEDGE_BASE_DESIGN.md`、`Knowledge.md`
 
@@ -207,6 +207,11 @@ flowchart TB
 - **I-2** 数据层：SQLAlchemy 2.0 async + Alembic（SQLite 起步），domain/user/role/permission/group 全表带 `domain_id`，ORM 域过滤强制。
 - **I-3** `auth` 主体：用户/角色/权限/域 CRUD、JWT 签发/刷新/吊销、服务账号 API key、TOTP、防爆破、域切换（`X-Domain-Id`）。
 - **I-4** **企业内网账号验证接入**：凭据状态判定（读加密凭据文件 → missing/unreadable/expired/invalid/authorized）+ 身份回查（工号 → 真实身份）→ 首次自动建号（初始低权 `viewer`）→ 管理员复核提权。存 token 不存密码、access-only 投影。落地为 auth 的一个登录后端。
+
+  **已实现（2026-11-18）**——落地为「OSS token 透传回查」：平台不碰密码，只把 OSS 签发的 token 透传给 OSS 换身份，再按工号映射/建号、签发平台 JWT（密码只在 OSS 侧校验，平台存工号不存密码）。
+  - 文件：`governance/oss.py`（`OssAuth.verify(token)` → `{w3account, department, region}`，经 `POST {endpoint}/auth/getUserDetail` + `X-Auth-Token`）、`governance/service.py::login_with_oss`（回查 → `get_user_by_w3account` → 首次 `_auto_provision` 建低权 `viewer` → 审计 → 签发 JWT）、`governance/web.py`（`POST /api/v1/auth/oss`，入参 `{token}`）、`governance/store.py`（`users.huawei_w3account` 唯一索引列 + `get_user_by_w3account`）、`config.py`（`[oss] endpoint`，或环境变量 `AGENT_BASE_OSS_ENDPOINT`）。
+  - 验证：`mocks/oss.py` 提供本地模拟 OSS REST（`/auth/login` 工号+密码换 token、`/auth/getUserDetail` 凭 `X-Auth-Token` 回查工号/部门/区域、`/health`），`python -m agent_base oss-mock --port 8890` 启动；演示工号 `w000001/w000002/w000003`（密码 `demo-pass-1/2/3`）。
+  - 语义：首次自动建号为域内 `viewer`；停用/锁定复用既有账号状态；「管理员复核提权」走 I-3 的 grant 接口（本次未新增独立复核流）。
 - **I-5** 实例注册 / 发现：`workspace_id ↔ domain_id ↔ 实例` 绑定 + 实例元数据（内部 endpoint、健康、引擎版本、配额）；agent-base 侧把固定 workspace_id 写入实例元数据、拒绝切换 data root（`USER_ISOLATION_DESIGN.md §5.1`）。
 - **I-6** 身份注入：治理层验 JWT 后向实例传可信身份 `(user_id, workspace_id, role/scope, 有效期)`，实例二次校验；实例间独立服务 token，用户 token 不透传 CLI/MCP。
 

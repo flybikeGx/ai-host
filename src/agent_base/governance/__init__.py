@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 from .gateway import Gateway
+from .oss import OssAuth
 from .registry import ServiceRegistry
 from .service import Governance
 
-__all__ = ["Governance", "ServiceRegistry", "Gateway"]
+__all__ = ["Governance", "ServiceRegistry", "Gateway", "OssAuth"]

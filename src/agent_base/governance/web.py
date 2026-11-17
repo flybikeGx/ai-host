@@ -25,6 +25,11 @@ class ApiKeyInput(BaseModel):
     key: str
 
 
+class OssLoginInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str
+
+
 class DomainInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
@@ -144,6 +149,13 @@ def register(app: FastAPI, config):
     def login_api_key(body: ApiKeyInput):
         try:
             return gov.login_with_api_key(body.key)
+        except ValueError as error:
+            raise HTTPException(401, str(error))
+
+    @app.post("/api/v1/auth/oss")
+    def login_oss(body: OssLoginInput):
+        try:
+            return gov.login_with_oss(body.token)
         except ValueError as error:
             raise HTTPException(401, str(error))
 
