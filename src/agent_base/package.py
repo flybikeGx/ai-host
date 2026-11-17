@@ -40,6 +40,44 @@ def expand(values: list[str], package: Path, workspace: Path, python: str) -> li
     return result
 
 
+def validate_services(manifest: dict):
+    """v3 agent service declarations: explicit alias/service/contract/permissions."""
+    services = manifest.get("services", [])
+    if not isinstance(services, list):
+        raise ValueError("services 必须是数组")
+    aliases = set()
+    from .manifests import SERVICE_ID as _SERVICE_ID, CONTRACT as _CONTRACT, TOOL_NAME as _TOOL_NAME
+    for service in services:
+        if not isinstance(service, dict) or set(service) - {"alias", "service", "contract", "permissions", "required"}:
+            raise ValueError("services 条目字段不正确")
+        if not isinstance(service.get("alias"), str) or not _SERVICE_ID.fullmatch(service["alias"]):
+            raise ValueError("services.alias 必须是小写字母、数字和连字符")
+        if not _SERVICE_ID.fullmatch(service.get("service", "")):
+            raise ValueError(f"services.{service.get('alias')} 的 service 必须是服务 ID")
+        if not _CONTRACT.fullmatch(service.get("contract", "")):
+            raise ValueError(f"services.{service['alias']} 的 contract 必须形如 ticket-center/v1")
+        if service["alias"] in aliases:
+            raise ValueError(f"services.alias 重复：{service['alias']}")
+        aliases.add(service["alias"])
+        permissions = service.get("permissions", [])
+        if not isinstance(permissions, list) or not all(isinstance(p, str) and _TOOL_NAME.fullmatch(p) for p in permissions):
+            raise ValueError(f"services.{service['alias']} 的 permissions 必须是工具名数组")
+        if service.get("required") is not None and not isinstance(service["required"], bool):
+            raise ValueError(f"services.{service['alias']} 的 required 必须是布尔值")
+    tasks = manifest.get("tasks", {})
+    if not isinstance(tasks, dict):
+        raise ValueError("tasks 必须是对象")
+    for name, task in tasks.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(task, dict) or set(task) - {"requires"}:
+            raise ValueError("tasks 条目字段不正确")
+        requires = task.get("requires", [])
+        if not isinstance(requires, list) or not all(isinstance(r, str) for r in requires):
+            raise ValueError("tasks.requires 必须是别名数组")
+        missing = [r for r in requires if r not in aliases]
+        if missing:
+            raise ValueError(f"tasks.requires 引用未声明的服务别名：{missing}")
+
+
 def load_package(root: Path) -> dict:
     instructions = within(root, "AGENTS.md")
     if not instructions.is_file() or instructions.stat().st_size > 128 * 1024:
@@ -53,9 +91,19 @@ def load_package(root: Path) -> dict:
     if len(blocks) > 1 or (file.exists() and blocks):
         raise ValueError("只能有一个机器配置来源：agent.yaml 或 Installation.md 中唯一的 agent-base-install 配置块")
     manifest = yaml.safe_load(file.read_text(encoding="utf-8") if file.exists() else blocks[0]) if file.exists() or blocks else {"schema_version": 1}
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2}:
-        raise ValueError("安装清单必须是 schema_version: 1 或 2 的对象")
-    unknown = set(manifest) - {"schema_version", "package", "task", "environment", "installation", "tools", "mcp", "skills", "completion", "limits"}
+    if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2, 3}:
+        raise ValueError("安装清单必须是 schema_version: 1、2 或 3 的对象")
+    if manifest["schema_version"] == 3:
+        if manifest.get("kind") != "agent":
+            raise ValueError("schema_version: 3 的 agent 安装必须声明 kind: agent；MCP 服务组件使用服务安装流程")
+        if "mcp" in manifest:
+            raise ValueError("v3 agent 不再声明 repo 私有 mcp.servers；共享服务使用 services 显式声明")
+        validate_services(manifest)
+    else:
+        for field in ("kind", "services", "tasks"):
+            if field in manifest:
+                raise ValueError(f"{field} 仅在 schema_version: 3 清单中有效")
+    unknown = set(manifest) - {"schema_version", "kind", "package", "task", "environment", "installation", "tools", "mcp", "skills", "completion", "limits", "services", "tasks"}
     if unknown:
         raise ValueError(f"未知清单字段：{sorted(unknown)}")
     for section in ("package", "task", "environment", "installation", "tools", "mcp", "completion", "limits"):

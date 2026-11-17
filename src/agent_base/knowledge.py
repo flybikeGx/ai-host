@@ -9,6 +9,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
 
 
 class KnowledgeError(ValueError):
@@ -69,9 +70,11 @@ def sections(body):
 
 
 class Knowledge:
-    def __init__(self, config):
+    def __init__(self, config, root=None):
         self.config = config
-        self.root = config.data / 'knowledge'
+        # A deployment owns its data directory; the legacy default stays the
+        # platform-wide knowledge root so existing installations keep working.
+        self.root = Path(root) if root is not None else config.data / 'knowledge'
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = self.root / 'knowledge.sqlite'
         with self.connection() as c:
@@ -162,8 +165,10 @@ class Knowledge:
             return [{**json.loads(r['definition']), 'actor': r['actor'], 'revision': r['revision']} for r in c.execute('SELECT * FROM bindings ORDER BY actor')]
 
     def bind(self, actor, definition):
-        if not isinstance(actor, str) or not re.fullmatch(r'admin|repo:[a-f0-9]{16}', actor):
-            raise KnowledgeError('绑定主体必须是 Admin 或已安装 repo')
+        # `agent:<platform id>` is the explicit platform identity written by
+        # the service catalog migration; legacy `repo:<hash>` stays readable.
+        if not isinstance(actor, str) or not re.fullmatch(r'admin|repo:[a-f0-9]{16}|agent:(?:admin|agt_[a-f0-9]{16})', actor):
+            raise KnowledgeError('绑定主体必须是 Admin、已安装 repo 或平台 Agent 身份')
         if set(definition) - {'primary_namespace_id', 'read_namespace_ids', 'submit_namespace_ids', 'required', 'enabled', 'expected_revision'}:
             raise KnowledgeError('绑定字段不正确')
         reads, writes = definition.get('read_namespace_ids', []), definition.get('submit_namespace_ids', [])
@@ -190,6 +195,19 @@ class Knowledge:
             c.execute('DELETE FROM grants WHERE expires<?', (time.time(),))
             c.execute('INSERT INTO grants VALUES(?,?,?,?)', (digest(token), kind, encoded(definition), time.time()+seconds))
         return token
+
+    def revoke_actor(self, actor):
+        """Immediate revocation for one service binding: drop grant and scope."""
+        with self.connection(True) as c:
+            c.execute('DELETE FROM bindings WHERE actor=?', (actor,))
+            for row in c.execute('SELECT hash,definition FROM grants').fetchall():
+                try:
+                    definition = json.loads(row['definition'])
+                except (TypeError, ValueError):
+                    continue
+                if definition.get('actor') == actor:
+                    c.execute('DELETE FROM grants WHERE hash=?', (row['hash'],))
+            self.audit(c, 'binding.revoke', actor, {})
 
     def grant(self, token, kind='agent', consume=False):
         with self.connection(consume) as c:

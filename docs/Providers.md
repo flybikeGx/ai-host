@@ -70,6 +70,7 @@ high = "high"
 - 业务侧拿不到这个值：v1 本地工具和 v2 常驻网关本地工具在启动业务程序前，按声明名和关键词双重剔除；v1 由 dsh 挂载的业务 MCP server 继承不到声明名或别名；v2 常驻网关的上游 MCP 使用 MCP SDK 的受限默认环境。
 - repo 安装步骤、依赖解析和完成检查等 repo 代码子进程也会移除 provider 凭据（含内置 DeepSeek 凭据），避免业务脚本读到模型密钥。
 - 常驻 repo 服务以无凭据环境启动，不持有 provider 凭据；它可能先于某个 Run 启动，因此不按 Run 的 provider 补发凭据。
+- 常驻网关启动本地业务工具时，会合并本次 Run 的配置快照、服务启动配置、当前配置和内部标记中的凭据变量名。全局 provider 被删除、更名或配置暂时无法解析时，旧任务快照中的凭据名仍会被过滤。
 - 管理 MCP 是获授权进程，显式获得所选 provider 的别名引用（以及既有的 `DEEPSEEK_*`、代理变量），用于它自己启动的 Run；不再依赖固定的 DeepSeek 变量列表。
 - `doctor` 输出 `provider`、`credential_env` 和 `credential_configured`，缺凭据时返回非零。它只报告配置和凭据状态，不发推理请求。
 

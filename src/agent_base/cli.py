@@ -38,6 +38,49 @@ def main():
     admin = commands.add_parser("admin", help="启动 admin-agent 对话")
     admin.add_argument("--session", default="default")
     admin.add_argument("--message", help="只发送一轮，保留同名会话上下文")
+    guardian = commands.add_parser("guardian", help="运行或查看共享服务看护 Agent")
+    guardian_commands = guardian.add_subparsers(dest="guardian_action")
+    guardian_run = guardian_commands.add_parser("run", help="立即执行一次巡检（真实运行时入口）")
+    guardian_run.add_argument("--deployment", help="重点关注一个部署")
+    guardian_run.add_argument("--incident", help="重点处理一张故障单")
+    guardian_run.add_argument("--wait", action="store_true", help="前台等待巡检完成")
+    guardian_commands.add_parser("status", help="查看看护与监督器状态")
+    service = commands.add_parser("service", help="管理共享 MCP 服务部署、发布与绑定")
+    service_commands = service.add_subparsers(dest="service_action", required=True)
+    for name in ("list", "agents"):
+        service_commands.add_parser(name)
+    for name in ("get", "probe", "start", "stop", "restart", "publish", "withdraw", "logs", "operations"):
+        sub = service_commands.add_parser(name)
+        sub.add_argument("deployment_id")
+        if name == "logs":
+            sub.add_argument("log_name")
+        if name == "operations":
+            sub.add_argument("--wait", type=float, default=0)
+    service_install = service_commands.add_parser("install")
+    service_install.add_argument("origin")
+    service_install.add_argument("--ref")
+    service_install.add_argument("--component")
+    service_install.add_argument("deployment_id")
+    service_install.add_argument("--owner", default="")
+    service_install.add_argument("--publish", action="store_true")
+    service_install.add_argument("--wait", action="store_true")
+    service_bind = service_commands.add_parser("bind")
+    service_bind.add_argument("deployment_id")
+    service_bind.add_argument("alias")
+    service_bind.add_argument("tools", help="逗号分隔的工具名")
+    service_bind.add_argument("--agent", help="Agent 身份 ID")
+    service_bind.add_argument("--repo-source", help="repo:<repo_id> 来源映射")
+    service_bind.add_argument("--contract")
+    service_commands.add_parser("bindings")
+    register_external = service_commands.add_parser("register-external")
+    register_external.add_argument("deployment_id")
+    register_external.add_argument("service_id")
+    register_external.add_argument("url")
+    register_external.add_argument("contract")
+    register_external.add_argument("--tools", default="", help="逗号分隔的预期工具名")
+    register_external.add_argument("--header-env", action="append", default=[],
+                                   help="NAME=ENV_VAR 形式的受控请求头")
+    register_external.add_argument("--owner", default="")
     for name in ("run", "install"):
         item = commands.add_parser(name)
         item.add_argument("repo")
@@ -190,6 +233,83 @@ def main():
             from .admin import Admin
             agent = Admin(config, args.session)
             print(agent.turn(args.message)) if args.message else agent.chat()
+            return
+        if args.action == "guardian":
+            from .guardian import guardian_status, run_guardian_patrol
+            if args.guardian_action == "status":
+                emit(guardian_status(config))
+            else:
+                if not args.wait:
+                    emit({"note": "前台执行一次巡检；持续看护请在配置 [guardian] enabled 后运行 serve/worker"})
+                emit(run_guardian_patrol(config, trigger="manual", deployment_id=args.deployment,
+                                         incident_id=args.incident))
+            return
+        if args.action == "service":
+            from .service_catalog import ServiceCatalog
+            from .service_install import ManagedServices
+            from .service_supervisor import probe_deployment
+            from .service_store import ServiceStore
+            catalog = ServiceCatalog(config)
+            managed = ManagedServices(config)
+            if args.service_action == "list":
+                emit(catalog.list_services())
+            elif args.service_action == "agents":
+                emit(ServiceStore(config.data).agent_identities())
+            elif args.service_action == "get":
+                emit({**catalog.describe(catalog._deployment(args.deployment_id)),
+                      "health": managed.gateway_health(catalog._deployment(args.deployment_id))})
+            elif args.service_action == "probe":
+                emit(probe_deployment(config, args.deployment_id))
+            elif args.service_action == "start":
+                emit(managed.start(args.deployment_id))
+            elif args.service_action == "stop":
+                emit(managed.stop(args.deployment_id, reason="cli"))
+            elif args.service_action == "restart":
+                emit(managed.restart(args.deployment_id, reason="cli"))
+            elif args.service_action == "publish":
+                emit(catalog.publish(args.deployment_id))
+            elif args.service_action == "withdraw":
+                emit(catalog.withdraw(args.deployment_id))
+            elif args.service_action == "logs":
+                emit(managed.read_log(args.deployment_id, args.log_name))
+            elif args.service_action == "operations":
+                operations = managed.services.operations(args.deployment_id)
+                if args.wait and operations:
+                    emit(managed.get_operation(operations[0]["id"], wait=args.wait))
+                else:
+                    emit(operations)
+            elif args.service_action == "install":
+                from .review import Reviews
+                candidate = Reviews(config).prepare(args.origin, args.ref, component=args.component)
+                plan = managed.plan_install(candidate, deployment_id=args.deployment_id, owner=args.owner,
+                                            publish=args.publish)
+                operation = managed.apply_install(plan, background=not args.wait,
+                                                  idempotency_key="cli-" + plan["revision_id"])
+                if args.wait:
+                    operation = managed.get_operation(operation["id"], wait=300)
+                emit(operation)
+            elif args.service_action == "bind":
+                stores = ServiceStore(config.data)
+                agent_id = args.agent
+                if not agent_id and args.repo_source:
+                    agent_id = stores.ensure_agent_identity(source=args.repo_source,
+                                                            name=args.repo_source.removesuffix("repo:")[:40])["id"]
+                if not agent_id:
+                    raise ValueError("需要 --agent 或 --repo-source")
+                emit(catalog.bind(agent_id=agent_id, deployment_id=args.deployment_id, alias=args.alias,
+                                  tools=[t for t in args.tools.split(",") if t.strip()],
+                                  contract=args.contract))
+            elif args.service_action == "bindings":
+                emit(ServiceStore(config.data).bindings())
+            elif args.service_action == "register-external":
+                headers = {}
+                for item in args.header_env:
+                    name, _, source = item.partition("=")
+                    headers[name] = {"from_env": source}
+                emit(catalog.register_external(deployment_id=args.deployment_id, service_id=args.service_id,
+                                               url=args.url, contract=args.contract,
+                                               expected_tools=[t for t in args.tools.split(",") if t.strip()],
+                                               headers=headers, owner=args.owner))
             return
         from .service import Service
         from .mcp_server import public

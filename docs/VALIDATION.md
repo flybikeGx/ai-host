@@ -1,5 +1,108 @@
 # 初版验证记录
 
+## 2026-11-17：工单 002 再次边界复验修复（F2/F6）
+
+独立复验在第 14 节的相邻边界中发现 2 个 P1，已修复并加入正式回归。
+
+- **F2 空项目集合**：网关对项目参数的空数组、空字符串、缺省和非字符串值均拒绝；`projects: []` 不能退化为无过滤全库查询。stdio/HTTP 一致。
+- **F6 安装期提前激活候选**：安装步骤完成前不改写活动 revision/config；进行中的 install operation 作为持久准入，公共 start/restart/stop 与另一个安装都会冲突，不会切换候选。候选只在步骤成功后的 start/validate 中提升；失败/取消/崩溃恢复活动快照，旧网关和在途调用保留。
+- 正式回归：`test_empty_project_filter_cannot_read_outside_binding[stdio|http]`、`test_concurrent_start_and_restart_cannot_activate_install_candidate`，以及既有 F2/F6 回归。
+
+复验结果：
+
+- 原 10 项 + 补充 4 项 + 再次补充 3 项独立复现：**17 passed**，26.88 秒。
+- `pytest -q tests tickets/acceptance`：**233 passed**，1 个既有弃用提示，233.00 秒（项目测试 213 项、第一阶段验收 3 项、独立复现 17 项）。
+- Playwright：**19 passed**，39.9 秒。
+- `scripts/validate_managed_services.py`：**28 项通过**，收据 `.agent-base/validations/managed-services-20261117-093033/result.json`。
+- 最终证据：`tickets/acceptance/002-final-20261117.json`。未接管现有业务部署/知识库，未执行真实付费模型调用。
+
+Windows 真机、真实企业 provider/代理/CA、真实内网 MCP 与真实工单后端仍为现场待验收项。
+
+## 2026-11-16：工单 002 补充边界复验修复（F2/F6/F8）
+
+独立复验在第 12 节的补充检查中发现 3 个边界问题，已修复并加入正式回归。
+
+- **F2 无项目参数绕过**：网关读取完整工具 input schema；`scope.projects` 下工具没有项目参数、调用缺少项目参数、嵌套或显式参数越界都拒绝，不再放行全库查询；stdio 与 HTTP 一致。
+- **F6 繁忙升级清理旧代际**：安装计划记录活动快照与候选 revision；拒绝切换/失败时若旧网关存活，恢复原 revision/config/config_revision、generation、PID/出生时间、期望/观测状态，不执行 stop，旧在途调用继续完成；只清理本操作创建的网关。旧代际已停止时记录 `upgrade_failed_requires_input`，不伪造服务仍运行。
+- **F8 详情关闭后迟到响应重开浮层**：服务页详情请求使用单调 epoch，关闭/切换/自动刷新/动作后检查，旧响应不能重新设置 detail；新增 1.2 秒延迟浏览器回归。
+- 独立验收 busy-upgrade 脚本的 HTTP 客户端默认 5 秒超时恰好等于测试后端 5 秒慢调用，会把保留成功误报为超时；将该测试客户端超时校正为 20 秒，不改变业务断言、mock 或慢调用。
+
+复验结果：
+
+- 原 10 项 + 补充 4 项独立复现：**14 passed**，22.70 秒。
+- `pytest -q tests tickets/acceptance`：**227 passed**，1 个既有弃用提示，221.82 秒（项目测试 210 项、第一阶段验收 3 项、独立复现 14 项）。
+- Playwright：**19 passed**，39.9 秒（新增迟到响应回归）。
+- `scripts/validate_managed_services.py`：**28 项通过**，收据 `.agent-base/validations/managed-services-20261116-175525/result.json`。
+- 最终证据：`tickets/acceptance/002-final-after-boundary-fixes-20261116.json`。未接管现有业务部署/知识库，未执行真实付费模型调用。
+
+Windows 真机、真实企业 provider/代理/CA、真实内网 MCP 与真实工单后端仍为现场待验收项。
+
+## 2026-11-16：工单 002 独立验收问题修复（F1–F7）
+
+独立验收发现 7 类问题并记录在 `tickets/002-phase-2-acceptance.md`；本轮修复后 10 项独立复现全部通过。
+
+- **F1 外部服务绕过授权**：外部端点不再直接挂给 Agent。`register_external_service` 启动平台本机接入层；Agent 只获得本机地址和平台 grant，工具目录按绑定过滤，调用校验工具与 `scope.projects`，撤权后返回协议错误。外部业务凭据只存在于接入层环境，平台仍不启动/重启远端进程。
+- **F2 项目范围未执行**：普通共享服务范围明确为 `scope={"projects":[...]}`；绑定拒绝未知结构，stdio 与 HTTP 网关逐次校验 `project`/`project_id`/`namespace` 等参数，范围外调用失败。
+- **F3 看护默认工具**：看护 patch 禁用 dsh 默认 fs/搜索、shell、jobs、skill、subagent、workflow、web、goal、todo、plan-mode、MCP 资源目录等工具行；真实 dsh 模型请求的工具目录只含 `mcp__guardian__*`。
+- **F4 stdio 契约丢失**：缓存并透传完整工具定义（描述、input/output schema）与完整 `CallToolResult`（`isError`/`structuredContent`/meta）。
+- **F5 HTTP 在途计数**：目录过滤分支不再重复增加 `in_flight`，一次请求只计数/释放一次。
+- **F6 升级仍运行旧代码**：网关健康响应携带 revision/config 身份；start 早返回同时核对活动身份，不一致时排空并切换代际；相同 revision/config 的重复安装复用代际。
+- **F7 v3 空声明回退全部绑定**：v3 `services: []` 或缺失字段精确解析为空；只有 Admin 无 manifest 时才列出全部绑定。
+
+正式回归新增于 `tests/test_services_install.py`、`tests/test_services_catalog.py`、`tests/test_service_supervisor.py`，没有只改独立验收脚本。复验结果：
+
+- `pytest -q tests tickets/acceptance`：**219 passed**，1 个既有弃用提示，209.57 秒（项目测试 206 项、第一阶段验收 3 项、独立复现 10 项）。
+- Playwright：**18 passed**，38.0 秒。
+- `scripts/validate_managed_services.py`：**28 项通过**，收据 `.agent-base/validations/managed-services-20261116-170939/result.json`。
+- 复验证据：`tickets/acceptance/002-review-after-fixes-20261116.json`；隔离目录、虚构凭据，未接管现有业务部署/知识库，未执行真实付费模型调用。
+
+Windows 真机、真实企业 provider/代理/CA、真实内网 MCP 与真实工单后端仍为现场待验收项。
+
+## 2026-11-16：工单 002 第二阶段共享 MCP、看护与管理页（A/B/C/D）
+
+- 完整 Python 回归：`UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen pytest -q`，**198 passed**（含 1 个既有 Starlette/httpx 弃用提示，147.39 秒）。新增覆盖 v3 清单、stdio/HTTP 托管安装、发布与外部登记、显式绑定与撤权、统一解析、故障单/恢复预算/维护状态、看护受限工具、内置知识库监督、知识库迁移，以及共享服务管理 API。
+- 浏览器回归：`frontend` 目录 `npx playwright test`，**18 passed**（原 15 项加 3 项共享服务页面：状态/绑定/详情/维护拦截/空态与错误态/390px 窄屏无整页横向溢出）。测试使用隔离服务、fake CLI 和真实本机 MCP；fixture 启动时会清理上次被强制结束的残留会话进程。
+- 统一本地验收：`uv run --frozen python scripts/validate_managed_services.py`，**28 项检查通过**，收据 `.agent-base/validations/managed-services-20261116-155634/result.json`（忽略目录，不含凭据值）。本次环境 `real_dsh: true`，无跳过项。
+
+### A. 安装控制面
+
+- 同一 repo 的 MCP 组件按固定 commit 审阅，计划冻结 service/revision/组件/清单摘要；stdio 与原生 HTTP 两个示例均完成真实 MCP `initialize`、工具目录和只读业务探针，验证等级 `business_verified`。HTTP 后端由平台分配私有端口，外部只暴露部署稳定端点。
+- 重复安装复用不可变 revision 与同一活动代际；并发安装只产生一个持久操作，落败请求返回 duplicate 快照；安装步骤失败进入 `needs_input`，不自动重跑未知结果；执行器中断的未知步骤同样要求人工核对；失败安装不遗留孤儿实例；数据目录在失败和重启后保留。
+- 安装/运行环境剔除 provider 凭据，只显式传递声明的业务凭据；日志读取按已知文件名并脱敏 Bearer token。
+
+### B. 发布、外部服务与绑定
+
+- 未验证部署拒绝发布；已撤销发布不能直接重新发布；发布不创建绑定。两个 v3 Agent 并发运行、绑定同一 stdio 部署，实际 Run 中工具目录分别为 `ticket_search` 与 `ticket_search + ticket_subscribe`，共享同一 `boot_id`，停止其中一个 Agent 不影响另一个的调用。
+- HTTP 代理模式现在按绑定过滤 `tools/list`（JSON/SSE），越权 `tools/call` 仍返回授权范围错误；真实调用返回 `auth_ok`。外部 HTTP 服务经真实 MCP 协议验证后发布，平台拒绝启动/重启，且不显示本机资源指标。
+- 撤权后已有授权立即被网关拒绝；必需服务缺失时 Run 在产生业务副作用前失败。运行入口统一生成 dsh patch 与 `.agent/resources.json`，凭据仅存在于进程环境。
+
+### C. 监督器与看护
+
+- 故障注入（直接终止网关）后连续探测为 `degraded, degraded, unhealthy`，形成一张故障单；监督器按预算启动新一代际（recovery_attempts=1）。持续健康后故障单附证据关闭；主动停止、维护中和已撤销发布的服务不会被复活。
+- 看护 Agent 经真实 dsh 入口和受限 MCP 工具白名单完成 overview/detail/probe/note，并在部署预授权、`restart_safe`、预算和排空检查通过后执行真实重启（代际 3→4）；模型/看护不可用时监督器仍独立探测，管理页显示看护 `failed`/`stale`。
+- 本轮看护的模型决策使用受控 fake dsh（收据中如实标注）；工具授权、服务控制器和实际重启是真实执行，不是 Mock 调用计数。
+
+### D. 知识库迁移与管理页
+
+- 隔离知识库完成 `prepare → apply → verify`：项目 1、文档 1、版本 1、待审投稿 1、审计与检索索引均保留；来源与目标业务摘要完全一致。迁移启动唯一部署代际，发布并生成平台显式绑定；目标数据库完整性、迁移记录、唯一监督者与数据目录分离核对通过。未接管、未停止本机现有知识库。
+- `/services` 页面接入同一管理 API：展示期望/发布/观测状态、验证等级、绑定 Agent、故障单、最近操作和脱敏日志；启停/重启/探测/发布撤销/维护/绑定与撤权均显示持久状态，不把请求成功当作已恢复。外部服务只显示远端不可测。仪表盘按 `deployment_id` 且按真实进程归属只计一次资源。
+- 共享服务页面桌面/手机截图在浏览器回归输出 `frontend/test-results/services-*.png`（测试产物，不提交）。
+
+### 说明与尚未验收
+
+- 本机为 macOS；Windows 真机上的服务安装/重启/取消/清理、进程组与路径长度仍需现场验收。
+- 真实企业 provider/代理/CA、真实内网 MCP、实际企业工单后端未对接；本轮真实 dsh 使用本地 OpenAI 兼容网关和虚构凭据。真实付费模型测试未启用。
+- 外部服务远端 CPU/内存不可测；共享 stdio 仅接入可安全复用连接的服务；`session_sharing: isolated` 的服务不能共享给多个 Agent。
+- 未建设本地 fetch、dsh GUI 自动连接、集群高可用和完整多用户平台；未改动现有业务部署。设计差异和操作入口见 [ManagedServices.md](ManagedServices.md)。
+
+## 2026-11-13：工单 001 配置快照凭据隔离修复（F1a）
+
+- 常驻网关为每次本地业务工具调用合并本次 Run 配置快照中的 `api_key_env` 声明，以及服务启动配置、当前配置和内部标记中的声明。全局 provider 被删除、更名或配置暂时无法解析时，旧任务使用的凭据变量名仍被过滤；兼容没有 runtime 快照的旧运行记录。
+- 将既有“服务先启动、后声明 provider”的真实本地 MCP 集成测试扩展为配置不变、删除 provider、更名 provider/凭据变量、配置无法解析四种场景。修改前为 **1 passed / 3 failed**，失败均为业务工具返回 `late_visible: true`；修复后四种场景及独立验收复现共 **5 passed**，凭据均不可见。
+- 完整检查：仓库根目录执行 `UV_CACHE_DIR=/private/tmp/agent-base-acceptance-uv-cache uv run --frozen pytest -q tests tickets/acceptance`，**166 passed、1 个既有 Starlette/httpx 弃用提示，108.91 秒**。其中正式项目回归 163 项，两份本地验收脚本共 3 项；包括真实 dsh + 本地测试网关、真实本地 MCP、任务/cron/对话和目录链接回归。
+- 测试仅使用虚构凭据、隔离状态目录与本地端口；未对接真实企业网关，未重启既有业务服务。修复需要在常驻 repo MCP 服务重启后加载。
+- 结论：第一阶段本地可验证范围通过；Windows 原生 junction 真机创建/清理、跨卷与普通用户场景、真实内网 provider 仍按约定待现场验收。Linux 实机和 CodeAgent 内网的边界保持此前记录。
+
 ## 2026-11-13：工单 001 验收问题修复（F1/F2）
 
 自动回归 **160 项通过**（含 1 项既有 Starlette/httpx 弃用提示）。
@@ -224,6 +327,10 @@ Web 已登记 finance-demo、inventory-demo、research-demo 三个工作，并�
 另执行四项 Playwright 真实 Chrome 测试，全部通过：多轮历史和 Markdown 安全渲染；刷新恢复且不重复发送；repo 工具卡片、产物下载、切换会话不中断及停止；390px 手机布局和中文输入法回车行为。测试使用独立 8879 服务和 fake CLI，与上面的真实模型验收分开。
 
 实际页面截图在同一收据目录的 `web-chat.png` 和 `web-chat-mobile.png`。只读检查确认页面列出四个 Agent，浏览器没有 JavaScript 运行错误；前端生产构建、Python 编译及全项目提示词路径检查均通过。
+
+## 2026-11-17 并发安装准入修复验证
+
+安装准入改为同一 SQLite 写事务中的幂等查重、活动检查与操作创建；正式新增跨进程竞争、幂等重试和历史列表检查。定向 23 项通过，完整 Python/验收脚本 238 项通过（含此前 18 项验收复现，1 个既有弃用提示），统一服务端到端 28 项通过。前端及浏览器用例未变化，本轮未重跑浏览器，沿用第四轮 19 项通过记录。所有验证使用隔离数据和虚构凭据；未升级/停止现有业务服务，Windows/真实内网仍待现场验收。本轮为用户授权的直接修复及回归。
 
 ## 尚未验证
 

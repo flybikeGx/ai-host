@@ -118,6 +118,7 @@ class Config:
     data: Path
     runtime: dict = field(default_factory=dict)
     max_concurrent: int = 2
+    guardian: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, filename: str | Path | None = None) -> "Config":
@@ -144,7 +145,29 @@ class Config:
         timeout = runtime.get("timeout_seconds", 1800)
         if not isinstance(timeout, (int, float)) or not 1 <= timeout <= 86400:
             raise ValueError("timeout_seconds 必须在 1–86400 之间")
-        return cls(path, data, runtime, cap)
+        guardian = _parse_guardian(raw.get("guardian", {}))
+        return cls(path, data, runtime, cap, guardian)
+
+
+def _parse_guardian(raw) -> dict:
+    if not isinstance(raw, dict):
+        raise ValueError("guardian 必须是表")
+    unknown = set(raw) - {"enabled", "interval_seconds", "model", "effort", "timeout_seconds"}
+    if unknown:
+        raise ValueError(f"guardian 包含不支持的字段：{sorted(unknown)}")
+    result = {"enabled": bool(raw.get("enabled", False)), "interval_seconds": raw.get("interval_seconds", 300)}
+    if not isinstance(result["interval_seconds"], (int, float)) or not 30 <= result["interval_seconds"] <= 86400:
+        raise ValueError("guardian.interval_seconds 必须在 30–86400 之间")
+    for key in ("model", "effort"):
+        if raw.get(key) is not None:
+            if not isinstance(raw[key], str) or not raw[key].strip():
+                raise ValueError(f"guardian.{key} 必须是非空文本")
+            result[key] = raw[key]
+    if raw.get("timeout_seconds") is not None:
+        if not isinstance(raw["timeout_seconds"], (int, float)) or not 60 <= raw["timeout_seconds"] <= 86400:
+            raise ValueError("guardian.timeout_seconds 必须在 60–86400 之间")
+        result["timeout_seconds"] = raw["timeout_seconds"]
+    return result
 
 
 def validate_selection(runtime: dict):

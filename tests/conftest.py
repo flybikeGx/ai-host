@@ -63,3 +63,65 @@ def repositories(config):
     yield manager
     for item in manager.list():
         manager.stop(item["id"])
+
+
+@pytest.fixture
+def service_repos(tmp_path):
+    """Git repos built from the managed-service examples; isolated state."""
+    import shutil as _shutil
+    examples = Path(__file__).resolve().parents[1] / "examples/managed-services"
+    result = {}
+    for name in ("ticket-center-stdio", "ticket-center-http"):
+        path = tmp_path / name
+        _shutil.copytree(examples / name, path, ignore=_shutil.ignore_patterns("__pycache__"))
+        subprocess.run(["git", "init", "--quiet", str(path)], check=True)
+        subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "service fixture"], check=True)
+        result[name] = path
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    for name in ("triage-agent", "ops-agent"):
+        path = agents / name
+        _shutil.copytree(examples / "agents" / name, ignore=_shutil.ignore_patterns("__pycache__"), dst=path)
+        subprocess.run(["git", "init", "--quiet", str(path)], check=True)
+        subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "agent fixture"], check=True)
+        result[name] = path
+    return result
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Stop repo gateways created by a test even when the test forgets to.
+
+    Runs before fixture finalizers so the per-test config is still available.
+    """
+    config = item.funcargs.get("config")
+    if config is None:
+        return
+    try:
+        from agent_base.repositories import Repositories
+        manager = Repositories(config)
+        for entry in manager.list():
+            try:
+                manager.stop(entry["id"])
+            except (OSError, ValueError):
+                pass
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def managed(config, monkeypatch):
+    from agent_base.service_install import ManagedServices
+    monkeypatch.setenv("TICKET_SERVICE_AUTH", "fixture-ticket-secret")
+    monkeypatch.setenv("TICKET_SERVICE_HTTP_AUTH", "Bearer fixture-http-secret")
+    manager = ManagedServices(config)
+    yield manager
+    for deployment in manager.services.deployments():
+        if deployment["mode"] in {"managed", "external"}:
+            try:
+                manager.stop(deployment["id"], reason="test-teardown", drain=False)
+            except (OSError, ValueError):
+                pass

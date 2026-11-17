@@ -264,11 +264,12 @@ def test_v2_local_tool_env_excludes_declared_provider_credential(config, reposit
     asyncio.run(exercise())
     repositories.store.update(job["id"], status="cancelled")
 
+@pytest.mark.parametrize("config_change", ["unchanged", "removed", "renamed", "invalid"])
 def test_long_lived_gateway_strips_credentials_declared_after_start(config, repositories, resource_repos,
-                                                                   monkeypatch, tmp_path):
+                                                                   monkeypatch, tmp_path, config_change):
     # The repo service can start before the provider definition exists. A later
-    # Run must still not expose that credential to business tools, so the
-    # gateway reloads declared names for every call.
+    # Run keeps its provider snapshot even if the global definition disappears
+    # or becomes unreadable before its business tool call.
     monkeypatch.setenv("LATE_LOGIN", "neutral-secret-do-not-log")
     repo = resource_repos["finance"]
     (repo / "tools/probe_credential.py").write_text(
@@ -289,12 +290,23 @@ def test_long_lived_gateway_strips_credentials_declared_after_start(config, repo
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                     "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "late probe"], check=True)
     item = repositories.install(str(repo))
-    config.path.write_text(config.path.read_text(encoding='utf-8') +
+    original_config = config.path.read_text(encoding='utf-8')
+    config.path.write_text(original_config +
                            '\n[providers.late]\napi="openai-completions"\nbase_url="https://llm.internal.example/v1"\n'
                            'api_key_env="LATE_LOGIN"\n\n[[providers.late.models]]\nid="late-model"\n', encoding='utf-8')
     workspace = tmp_path / "late-workspace"
     (workspace / "artifacts").mkdir(parents=True)
-    job = repositories.store.create({"installation_id": item["id"]})
+    from agent_base.config import Config
+    snapshot = Config.load(config.path).runtime
+    snapshot.update(provider="late", model="late-model", effort=None)
+    job = repositories.store.create({"installation_id": item["id"], "runtime": snapshot})
+    if config_change == "removed":
+        config.path.write_text(original_config, encoding='utf-8')
+    elif config_change == "renamed":
+        changed = config.path.read_text(encoding='utf-8').replace("providers.late", "providers.replacement")
+        config.path.write_text(changed.replace("LATE_LOGIN", "REPLACEMENT_LOGIN"), encoding='utf-8')
+    elif config_change == "invalid":
+        config.path.write_text("[invalid", encoding='utf-8')
     repositories.store.update(job["id"], status="running", workspace=str(workspace), deadline=time.time() + 15)
     async def exercise():
         async with httpx.AsyncClient(headers=repositories.headers(item, job["id"]), trust_env=False) as client:
@@ -303,7 +315,7 @@ def test_long_lived_gateway_strips_credentials_declared_after_start(config, repo
                     await session.initialize()
                     answer = await session.call_tool("probe_credential", {})
                     assert not answer.isError, answer.content
-                    assert json.loads(answer.content[0].text)["late_visible"] is False
+                    assert json.loads(answer.content[0].text)["late_visible"] is False, answer.content[0].text
     asyncio.run(exercise())
     repositories.store.update(job["id"], status="cancelled")
 

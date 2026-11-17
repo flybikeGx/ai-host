@@ -27,9 +27,17 @@ Windows 对应执行 `.venv\Scripts\agent-base.exe`。Windows 的 Python 管理�
 
 仓库自身的初始化支持 `schema_version:2`：在 agent.yaml 或 Installation.md 的 agent-base-install 配置块列出 skills、MCP、依赖和初始化步骤。安装后 MCP 常驻、skills 固定共享，使用 `.venv/bin/agent-base repo install <repo>`。三个可运行示例与安装前审阅流程见 [RepoInstallation.md](docs/RepoInstallation.md)。
 
+阶段二新增 `schema_version:3` 的共享 MCP 服务（`kind: mcp-service`）与显式 Agent 绑定。示例在 [examples/managed-services](examples/managed-services)，通过 Admin 的 `prepare_service_install` / `apply_service_install` / `publish_service` / `bind_agent_service` 操作，管理页为 <http://127.0.0.1:8765/services>。隔离的完整验收：
+
+```sh
+UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen python scripts/validate_managed_services.py
+```
+
+脚本需要本机 Python/.venv；具备 `.runtime/dsh` 时使用真实 dsh + 本地模型网关，否则改用受控 fake runtime 并在收据中标注。说明见 [ManagedServices.md](docs/ManagedServices.md)。
+
 网页对话地址为 <http://127.0.0.1:8765/chat>，复用同一 serve 进程和模型凭据。生产前端文件已随项目构建，不需要启动单独 Node Web 服务或访问外部 CDN。只有修改 frontend 源码后才需要在该目录执行 `npm ci` 和 `npm run build`。详细说明见 [WebChat.md](docs/WebChat.md)。
 
 需要带入内网时，参照 [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) 准备独立配置和目标平台依赖；`--skip-dsh` 本身不会完成引擎切换。推送 Gitee 或使用离线 bundle 见 [Git 交接说明](docs/GIT_GUIDE.md)。
 ## 网页入口补充
 
-服务启动后，主页 `/` 进入仪表盘，原工作台迁到 `/workbench`；`/knowledge`、`/chat`、`/cron` 均可从统一侧栏进入。首次知识管理连接运行 `.venv/bin/agent-base open`，无需复制或显示 Token。Knowledge MCP 随 serve/worker 幂等启动，数据保存在忽略状态目录。详见 [Knowledge.md](docs/Knowledge.md)。
+服务启动后，主页 `/` 进入仪表盘，原工作台迁到 `/workbench`；`/services`、`/knowledge`、`/chat`、`/cron` 均可从统一侧栏进入。首次知识管理连接运行 `.venv/bin/agent-base open`，无需复制或显示 Token。Knowledge MCP 随 serve/worker 幂等启动，数据保存在忽略状态目录。详见 [Knowledge.md](docs/Knowledge.md)。

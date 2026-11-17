@@ -142,6 +142,8 @@ def create_app(config, *, background=True):
             raise HTTPException(401, "需要 Bearer token")
 
     api = [Depends(authorize)]
+    from .service_web import register as register_services
+    register_services(app, config, api)
     static = Path(__file__).parent / "static" / "chat"
     if (static / "assets").is_dir():
         app.mount("/chat/assets", StaticFiles(directory=static / "assets"), name="chat-assets")
@@ -150,6 +152,7 @@ def create_app(config, *, background=True):
     @app.get("/cron", response_class=HTMLResponse)
     @app.get("/dashboard", response_class=HTMLResponse)
     @app.get("/knowledge", response_class=HTMLResponse)
+    @app.get("/services", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")

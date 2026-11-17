@@ -149,6 +149,9 @@ class Dashboard:
         self.config, self.scheduler = config, scheduler
         self.scheduler_thread = scheduler_thread
         self.store, self.repositories = Store(config.data), Repositories(config)
+        from .service_store import ServiceStore
+        # Ensure the shared-service tables exist before sampling their counters.
+        ServiceStore(config.data)
         self.created = time.time()
         self.stop_event, self.thread = threading.Event(), None
         self.sample_lock, self.data_lock = threading.Lock(), threading.Lock()
@@ -251,6 +254,9 @@ class Dashboard:
             works = [dict(r) for r in conn.execute('SELECT * FROM works WHERE enabled=1 AND next_due IS NOT NULL ORDER BY next_due LIMIT 5')]
             disk_runs = [dict(r) for r in conn.execute(f'SELECT id,status,workspace,spec FROM runs r WHERE workspace IS NOT NULL AND {business} ORDER BY updated DESC LIMIT 201')]
             disk_chats = [dict(r) for r in conn.execute('SELECT id,target FROM conversations ORDER BY updated DESC LIMIT 201')]
+            service_records = [dict(r) for r in conn.execute('SELECT * FROM deployments ORDER BY created')]
+            service_bindings = dict(conn.execute('SELECT deployment_id,count(*) FROM service_bindings WHERE enabled=1 GROUP BY deployment_id'))
+            service_incidents = dict(conn.execute("SELECT deployment_id,count(*) FROM service_incidents WHERE status IN ('open','monitoring') GROUP BY deployment_id"))
 
         agents = {'admin': {'id': 'admin', 'name': 'Admin Agent', 'kind': 'admin', 'commit': None, 'installed': True}}
         roots = [{'pid': os.getpid(), 'birth': psutil.Process().create_time(), 'owner': '_service', 'category': 'service'}]
@@ -258,6 +264,35 @@ class Dashboard:
         core_status = KnowledgeService(self.config).status()
         if pid_state(core_status.get('pid'), core_status.get('birth')) == 'alive':
             roots.append({'pid': core_status['pid'], 'birth': core_status['birth'], 'owner': '_knowledge_core', 'category': 'mcp'})
+        # Shared service deployments are measured once per real process, keyed
+        # by deployment_id; external endpoints never get local process metrics.
+        owner_by_pid = {(root['pid'], root['birth']): root['owner'] for root in roots}
+        service_rows = []
+        for item in service_records:
+            try:
+                config_fields = json.loads(item['config'])
+            except (TypeError, ValueError):
+                config_fields = {}
+            row = {'deployment_id': item['id'], 'service_id': item['service_id'], 'mode': item['mode'],
+                   'owner': config_fields.get('owner', ''), 'desired_state': item['desired_state'],
+                   'publish_state': item['publish_state'], 'observed_state': item['observed_state'],
+                   'observed_at': item['observed_at'], 'verification': item['verification'],
+                   'generation': item['generation'], 'maintenance': bool(item['maintenance']),
+                   'bindings': service_bindings.get(item['id'], 0),
+                   'open_incidents': service_incidents.get(item['id'], 0),
+                   'checked_at': item['observed_at'], '_pid': None, '_birth': None,
+                   'metrics_state': 'remote' if item['mode'] == 'external' else 'measured'}
+            if item['mode'] == 'managed' and item['gateway_pid']:
+                identity_key = (item['gateway_pid'], item['gateway_birth'])
+                holder = owner_by_pid.get(identity_key)
+                if holder is None:
+                    owner_by_pid[identity_key] = 'svc-' + item['id']
+                    roots.append({'pid': item['gateway_pid'], 'birth': item['gateway_birth'],
+                                  'owner': 'svc-' + item['id'], 'category': 'gateway'})
+                    holder = 'svc-' + item['id']
+                row['_pid'], row['_birth'] = identity_key
+                row['_owner'] = holder
+            service_rows.append(row)
         due = []
         for item in installations:
             item['manifest'] = json.loads(item['manifest'])
@@ -334,6 +369,20 @@ class Dashboard:
             for server_id, identity in identities.items():
                 roots.append({**identity, 'owner': 'mcp-' + item['id'] + '-' + server_id, 'category': 'mcp'})
         group_metrics, managed, process_states = self.processes.collect(roots, cores)
+        for row in service_rows:
+            key = (row.pop('_pid'), row.pop('_birth'))
+            holder = row.pop('_owner', None)
+            state = process_states.get(key, 'missing') if key[0] else 'missing'
+            row['process_state'] = state
+            if row['mode'] == 'external':
+                row['resources'] = None
+                row['metrics_state'] = 'remote'
+            elif state in {'alive', 'unknown'}:
+                row['resources'] = group_metrics.get(holder) if holder else None
+                row['metrics_state'] = 'measured' if row['resources'] else 'unattributed'
+            else:
+                row['resources'] = None
+                row['metrics_state'] = 'unattributed' if row['mode'] == 'managed' else 'remote'
         instances, seen = [], set()
         for item in candidates:
             identity = (item['pid'], item['birth'])
@@ -450,6 +499,10 @@ class Dashboard:
         bad = [m for m in gateways if m['state'] in {'down', 'unhealthy', 'failed'}]
         if bad:
             alerts.append({'kind': 'mcp', 'text': f'{len(bad)} 个 Repo 资源服务异常'})
+        bad_services = [m for m in service_rows
+                        if m['observed_state'] in {'unhealthy', 'degraded'} and not m['maintenance']]
+        if bad_services:
+            alerts.append({'kind': 'services', 'text': f"{len(bad_services)} 个共享服务当前不健康"})
         if scheduler_state in {'delayed', 'stopped'} or scheduler_error:
             alerts.append({'kind': 'scheduler', 'text': '调度循环延迟或最近一次循环出错'})
         db_size = 0
@@ -463,6 +516,7 @@ class Dashboard:
                          'memory': {'total_bytes': memory.total, 'available_bytes': memory.available, 'used_bytes': memory.total-memory.available, 'percent': memory_percent},
                          'disk': {'total_bytes': disk.total, 'used_bytes': disk.used, 'free_bytes': disk.free, 'percent': disk.percent}},
                 'managed': managed, 'agents': list(agents.values()), 'instances': instances, 'mcp': mcps, 'gateways': gateways,
+                'services': service_rows,
                 'workspaces': workspace_list[:100], 'workspace_stats': workspace_stats,
                 'core_services': [{'id':'knowledge','name':'Knowledge MCP','state':core_status['state'], 'pid':core_status.get('pid'),
                                    'resources':group_metrics.get('_knowledge_core'),'stats':core_status.get('stats',{})}],

@@ -17,6 +17,32 @@ from agent_base.web import create_app
 project = Path(__file__).resolve().parents[1]
 root = project / ".agent-base/ui-fixture"
 root.mkdir(parents=True, exist_ok=True)
+# A previous fixture whose web server was force-killed can leave detached
+# gateways/repo servers behind. Remove sessions and their recorded processes
+# before creating the new isolated one.
+import psutil
+
+
+def cleanup_sessions(base: Path):
+    for session in base.iterdir():
+        if not session.is_dir():
+            continue
+        for process in psutil.process_iter(["pid", "cmdline"]):
+            if process.pid == os.getpid():
+                continue
+            try:
+                command = process.info.get("cmdline") or []
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if any(str(session) in argument for argument in command):
+                try:
+                    process.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        shutil.rmtree(session, ignore_errors=True)
+
+
+cleanup_sessions(root)
 root = Path(tempfile.mkdtemp(prefix="session-", dir=root))
 file = root / "config.toml"
 file.write_text('[storage]\nroot="data"\n[queue]\nmax_concurrent=2\n[runtime]\nengine="dsh"\ncommand='
@@ -32,6 +58,30 @@ try:
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                     "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "UI fixture"], check=True)
     repositories.install(str(repo))
+    # One isolated managed MCP deployment so the shared-services page (and its
+    # state/action wiring) has a real local service to display.
+    os.environ.setdefault("TICKET_SERVICE_AUTH", "ui-fixture-ticket-secret")
+    service_repo = root / "ticket-center-stdio"
+    shutil.copytree(project / "examples/managed-services/ticket-center-stdio", service_repo,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    subprocess.run(["git", "init", "--quiet", str(service_repo)], check=True)
+    subprocess.run(["git", "-C", str(service_repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(service_repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "core.hooksPath=" + os.devnull, "commit", "--quiet", "-m", "UI service fixture"], check=True)
+    from agent_base.review import Reviews
+    from agent_base.service_install import ManagedServices
+    from agent_base.service_catalog import ServiceCatalog
+    from agent_base.service_store import ServiceStore
+    managed = ManagedServices(config)
+    candidate = Reviews(config).prepare(str(service_repo), None)
+    plan = managed.plan_install(candidate, deployment_id="ticket-ui", owner="UI fixture")
+    operation = managed.apply_install(plan, background=False)
+    assert operation["status"] == "succeeded", operation
+    ServiceCatalog(config).publish("ticket-ui")
+    stores = ServiceStore(config.data)
+    ui_agent = stores.ensure_agent_identity(source="repo:" + "u" * 16, name="ui-triage-agent")
+    ServiceCatalog(config).bind(agent_id=ui_agent["id"], deployment_id="ticket-ui", alias="tickets",
+                                tools=["ticket_search"])
     app = create_app(config)
     from agent_base.knowledge import Knowledge
     from fastapi.responses import JSONResponse
@@ -57,5 +107,10 @@ try:
 finally:
     from agent_base.knowledge_service import KnowledgeService
     KnowledgeService(config).stop()
+    try:
+        from agent_base.service_install import ManagedServices
+        ManagedServices(config).stop("ticket-ui", reason="ui-fixture-teardown", drain=False)
+    except (OSError, ValueError):
+        pass
     for item in repositories.list():
         repositories.stop(item["id"])

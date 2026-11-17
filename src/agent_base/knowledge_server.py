@@ -21,14 +21,20 @@ from .knowledge_mcp import TOOLS,call
 from .processes import identity
 
 
-def application(config):
-    store=Knowledge(config);server=Server('knowledge')
+def application(config, root=None):
+    store=Knowledge(config, root);server=Server('knowledge')
     manager=StreamableHTTPSessionManager(server,json_response=True,stateless=True)
     control=(store.root/'service-token').read_text().strip()
 
     def grant(request):
         authorization=request.headers.get('authorization','')
-        return store.grant(authorization.removeprefix('Bearer '))
+        token=authorization.removeprefix('Bearer ')
+        try:
+            return store.grant(token)
+        except KnowledgeError:
+            # Platform-scoped admin grants (cookie/API credentials) are also
+            # valid MCP bearer credentials; they carry explicit scope lists.
+            return store.grant(token,kind='admin')
 
     @server.list_tools()
     async def tools():return [types.Tool(**t) for t in TOOLS]
@@ -65,13 +71,14 @@ def application(config):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);args=parser.parse_args()
-    config=Config.load(args.config);store=Knowledge(config)
+    parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);parser.add_argument('--data')
+    args=parser.parse_args()
+    config=Config.load(args.config);store=Knowledge(config,args.data)
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0))
         item={'pid':os.getpid(),'birth':identity(os.getpid()),'endpoint':f'http://127.0.0.1:{sock.getsockname()[1]}/mcp'}
         file=store.root/'service.json.tmp';file.write_text(json.dumps(item));file.replace(store.root/'service.json')
-        uvicorn.Server(uvicorn.Config(application(config),log_level='warning',timeout_graceful_shutdown=5)).run(sockets=[sock])
+        uvicorn.Server(uvicorn.Config(application(config,args.data),log_level='warning',timeout_graceful_shutdown=5)).run(sockets=[sock])
 
 
 if __name__=='__main__':main()

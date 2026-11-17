@@ -2,6 +2,8 @@
 
 `schema_version: 2` 将资源从 Run 提升到 repo 安装版本。skills、依赖环境和 MCP 程序安装一次；MCP 在安装成功时就已启动，没有任务时也继续运行。Run 只连接自己的命名空间，结束或超时不停止共享服务。当前采用资源发现与提示词约束，允许感知其他目录，不引入容器强隔离。
 
+`schema_version: 3` 进一步把**共享 MCP 服务**与 Agent 安装分离：服务包按 `kind: mcp-service` 独立安装/发布/绑定，Agent 用 `services` 声明依赖。v1/v2 的 repo 私有 MCP 语义保持不变；需要跨 Agent 复用时使用 v3，详见 [共享 MCP 托管与看护](ManagedServices.md)。
+
 ## 三个可以直接运行的 repo
 
 | 示例 | skill 名称 | MCP 工具名 | 对 [2, 3, 5] 的结果 |
@@ -64,6 +66,48 @@ mcp:
 只加载声明的 skills 和 MCP。安装依赖、命令与接入层内部可以使用基座解析出的实际路径；仓库的 AGENTS.md 和 skill 文档使用相对路径。
 
 新 repo 还应提供根 entrypoint.md，定义无人值守工作。每次 Run 由基座注入 AGENTS + entrypoint + 本次参数 + 统一汇报契约；报告格式不放入安装清单。入口和技能一起冻结，判断其是否依赖本机绝对路径同样在安装前由 Admin 审阅，普通对话不自动执行入口。旧 task.default 的回退与结构化最终回复见 [RepoContract.md](RepoContract.md)，本地能力导出见 [export-guild.md](export-guild.md)。
+
+## v3：Agent 与共享 MCP 分离
+
+同一 repo 可以同时提交 Agent 和 MCP 组件；它们按组件相对路径分别审阅、安装和发布。
+
+**服务包**（`kind: mcp-service`）声明安装步骤、启动方式、数据目录、工具契约和探针。Admin 的调用顺序是
+`prepare_service_install` → `apply_service_install` → `publish_service`；安装会产生不可变 revision 和独立部署，
+`${service.data}` 是部署的持久数据目录。只有验证达到 `protocol_verified` / `business_verified` 才能发布，
+发布也不会自动授权任何 Agent。
+
+**Agent** 用显式服务声明代替 repo 私有 `mcp.servers`：
+
+```yaml
+schema_version: 3
+kind: agent
+package: {name: triage-agent, version: 0.1.0}
+task: {default: 使用 tickets 服务完成分诊。}
+services:
+  - alias: tickets
+    service: ticket-center
+    contract: ticket-center/v1
+    permissions: [ticket_search]
+    required: true
+```
+
+实际授权来自平台绑定（`bind_agent_service`），不是清单里的 `permissions`。同一 Agent 对同一服务 ID 的多个部署要使用不同 alias。
+运行时的 dsh 连接和 `.agent/resources.json` 来自同一份解析结果；撤权后新调用立即失败。任务所需服务缺失时在产生副作用前报错，
+可选服务不可用时提示本轮不要编造结果。
+
+可运行示例：
+
+- [ticket-center-stdio](../examples/managed-services/ticket-center-stdio/Installation.md)（共享 stdio）
+- [ticket-center-http](../examples/managed-services/ticket-center-http/Installation.md)（原生 HTTP + 私有端口）
+- [triage-agent](../examples/managed-services/agents/triage-agent/agent.yaml)、[ops-agent](../examples/managed-services/agents/ops-agent/agent.yaml)（显式绑定）
+
+统一本地验收：
+
+```sh
+UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen python scripts/validate_managed_services.py
+```
+
+服务状态、故障单、绑定和管理页见 [ManagedServices.md](ManagedServices.md)。
 
 ## 生命周期与资源位置
 

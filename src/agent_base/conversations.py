@@ -319,6 +319,11 @@ class Conversations:
                     prompt = prompt.replace("的一次独立任务", "的多轮对话")
                     prompt += "\n这是可继续追问的对话，使用本会话先前的消息。只处理本轮请求；普通问答无需重复执行默认任务或生成产物。\n"
                     patch = repo_patch(runtime, root, self.repositories, chat["target"], run_id, env)
+                    if item["manifest"].get("schema_version") == 3:
+                        from .service_resolver import ServiceResolver
+                        prompt = ServiceResolver(self.config).attach(
+                            patch=patch, env=env, workspace=workspace, manifest=item["manifest"],
+                            installation=item, turn_id=turn_id, deadline=deadline) + prompt
                     self.store.update(run_id, status="running")
                 from .knowledge_service import attach
                 actor = 'admin' if chat['target'] == 'admin' else 'repo:' + item['repo_id']

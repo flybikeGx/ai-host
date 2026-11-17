@@ -9,6 +9,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [Repo 安装与资源](RepoInstallation.md) | 清单、skills、常驻 MCP、资源命名空间和示例 |
+| [共享 MCP 托管与看护](ManagedServices.md) | v3 服务包、安装/发布/绑定、监督器、看护 Agent、管理页和知识库接管 |
 | [模型 provider 配置](Providers.md) | 内部网关路由、模型目录、凭据引用与失败行为 |
 | [Repo 运行契约](RepoContract.md) | entrypoint、任务参数、结构化汇报和产物验证 |
 | [本地 Agent 导出指南](export-guild.md) | 将已有本地 Agent 整理为可安装 repo |
@@ -25,6 +26,7 @@
 | 文档 | 内容与状态 |
 | --- | --- |
 | [项目设计与 TODO](DESIGN.md) | 当前实现、架构和后续任务 |
+| [第二阶段：MCP 托管、发布与看护](PHASE_2_MANAGED_MCP_DESIGN.md) | 已实施（本地验收完成）；设计背景、公共契约与实现差异 |
 | [项目设计书草稿](PROJECT_DESIGN_DRAFT.md) | 立项与汇报材料，包含拟建设能力 |
 | [知识库设计存档](KNOWLEDGE_BASE_DESIGN.md) | 首版设计及尚未实现的扩展 |
 | [用户隔离设计草案](USER_ISOLATION_DESIGN.md) | 暂缓实施，当前仍为单用户实现 |

@@ -127,8 +127,14 @@ class Repositories:
 
     def _install_checkout(self, origin, ref, repo_id, checkout, commit, deadline, cancelled):
         manifest = load_package(checkout)
-        if manifest["schema_version"] != 2:
-            raise ValueError("repo 长期安装要求 schema_version: 2；旧清单仍可使用原有 run/install")
+        if manifest["schema_version"] not in {2, 3}:
+            raise ValueError("repo 长期安装要求 schema_version: 2 或 3；旧清单仍可使用原有 run/install")
+        if manifest["schema_version"] == 3:
+            # Stable platform identity: the repo hash maps to one agent identity
+            # that survives installation version changes; bindings use it.
+            from .service_store import ServiceStore
+            ServiceStore(self.config.data).ensure_agent_identity(
+                source="repo:" + repo_id, name=manifest.get("package", {}).get("name", repo_id), kind="repo")
         digest = hashlib.sha256((repo_id + commit + json.dumps(manifest, sort_keys=True)).encode()).hexdigest()[:24]
         install_root = self.config.data / "repos" / repo_id / "installations" / digest
         with self.store.connection() as conn:

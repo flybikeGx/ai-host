@@ -1,0 +1,16 @@
+schema_version: 3
+kind: agent
+package:
+  name: ops-agent
+  version: 0.1.0
+task:
+  default: 使用 tickets 服务查询工单并登记订阅。
+skills:
+  - name: ticketing
+    path: skills/ticketing
+services:
+  - alias: tickets
+    service: ticket-center
+    contract: ticket-center/v1
+    permissions: [ticket_search, ticket_subscribe]
+    required: true

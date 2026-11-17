@@ -1,0 +1,16 @@
+schema_version: 3
+kind: agent
+package:
+  name: triage-agent
+  version: 0.1.0
+task:
+  default: 使用 tickets 服务查询工单并生成分诊报告。
+skills:
+  - name: ticketing
+    path: skills/ticketing
+services:
+  - alias: tickets
+    service: ticket-center
+    contract: ticket-center/v1
+    permissions: [ticket_search]
+    required: true

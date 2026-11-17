@@ -224,7 +224,7 @@ class Service:
                     sha = (root / "resolve-ref.stdout.log").read_text().strip()
                     command(["git", "-c", "core.hooksPath=" + os.devnull, "checkout", "--detach", sha], "checkout", command_env=git_env)
                     preliminary = load_package(workspace)
-                    if preliminary["schema_version"] == 2:
+                    if preliminary["schema_version"] in {2, 3}:
                         installed = repositories.install(spec["repo"], spec.get("ref"), checkout=workspace, commit=sha,
                                                            deadline=deadline, cancelled=cancel)
                         installation_id = installed["id"]
@@ -286,6 +286,20 @@ class Service:
                 if spec.get("installation_id"):
                     from .repo_runtime import repo_patch
                     patch = repo_patch(runtime, root, repositories, spec["installation_id"], run_id, env)
+                    if manifest.get("schema_version") == 3:
+                        # Explicit v3 service declarations resolve through the
+                        # shared catalog; the same resolver serves cron and web.
+                        from .service_resolver import ServiceResolver
+                        service_instructions = ServiceResolver(self.config).attach(
+                            patch=patch, env=env, workspace=workspace, manifest=manifest,
+                            installation=repositories.get(spec["installation_id"]),
+                            run_id=run_id, deadline=deadline)
+                        if service_instructions:
+                            prompt.write_text(service_instructions + prompt.read_text(encoding="utf-8"), encoding="utf-8")
+                            contract_file = root / "prompt-contract.json"
+                            contract = json.loads(contract_file.read_text())
+                            contract["prompt_sha256"] = hashlib.sha256(prompt.read_bytes()).hexdigest()
+                            contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
                 else:
                     patch = dsh_patch(runtime, root, package=root / "package", workspace=workspace, manifest=manifest, python=python)
                 from .knowledge_service import attach
@@ -300,7 +314,7 @@ class Service:
                         contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
                 args = dsh_command(runtime, patch)
             else:
-                if manifest.get("tools", {}).get("local") or manifest.get("mcp", {}).get("servers"):
+                if manifest.get("tools", {}).get("local") or manifest.get("mcp", {}).get("servers") or manifest.get("services"):
                     raise ValueError("CodeAgent adapter 尚未验证 MCP 挂载，不会静默忽略清单工具；请在内网适配 engines.py")
                 args = codeagent_command(runtime)
             self.store.update(run_id, status="running", session_status="starting")

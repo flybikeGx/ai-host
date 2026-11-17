@@ -10,13 +10,15 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 汇报材料：[项目设计书草稿](docs/PROJECT_DESIGN_DRAFT.md)，按立项口径说明建设目标、服务场景、总体架构、模块职责、核心流程、权限治理与敏捷建设路径。
 
-网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
+网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[共享服务](docs/ManagedServices.md)、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
 
 知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](docs/Knowledge.md)。
 
 Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
 
 搁置设计：[用户隔离草案](docs/USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
+
+共享服务：第二阶段已实现 MCP 独立托管、发布、显式绑定与看护，使用说明见 [共享 MCP 托管与看护](docs/ManagedServices.md)，设计背景见 [第二阶段设计](docs/PHASE_2_MANAGED_MCP_DESIGN.md)。仍不建设本地 fetch、GUI 自动接入和集群高可用。
 
 ## Repo 引入与无人值守入口
 
@@ -85,6 +87,26 @@ high = "high"
 
 已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、安装前审阅与复现方法见 [RepoInstallation.md](docs/RepoInstallation.md)。
 
+## 共享 MCP 服务（schema_version: 3）
+
+v3 把共享 MCP 从 Agent repo 中分离：`kind: mcp-service` 的服务包按固定 commit 安装、验证、发布到本机目录；Agent 用 `services` 显式声明依赖，由 Admin 绑定后才可使用。两个 Agent 可共用一份部署，停止或卸载其中一个不会停止服务。进程、故障单和显式授权在 <http://127.0.0.1:8765/services> 管理。
+
+典型 admin 意图：
+
+```text
+安装并发布 examples/managed-services/ticket-center-stdio，授权 triage-agent 只查询、ops-agent 查询并订阅。
+```
+
+常用管理工具：`prepare_service_install`、`apply_service_install`、`publish_service`、`bind_agent_service`、`list_services`、`get_service_incident`、`prepare_knowledge_migration`。服务发布不代表任何 Agent 已获授权；工具目录、项目范围和撤权都在服务端校验。
+
+本地统一验收（隔离状态、虚构凭据，含真实 dsh + 本地模型网关、故障恢复、看护和知识库迁移）：
+
+```sh
+UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen python scripts/validate_managed_services.py
+```
+
+清单字段、状态机、监督/看护默认值、知识库迁移和管理页说明见 [ManagedServices.md](docs/ManagedServices.md)。
+
 ## Web / cron 工作调度
 
 现在支持注册可重复触发的工作，通过 Web、cron、CLI 或 admin MCP 入队，由持久化调度器控制并发。每次运行独立 clone、复制输入到临时目录、创建新 session；产物验证通过后归档并清理目录，超时或失败保留现场。
@@ -93,7 +115,7 @@ high = "high"
 .venv/bin/agent-base serve --port 8765
 ```
 
-本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](docs/Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。
+本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](docs/Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。共享服务监督器和看护巡检也运行在 `serve`/`worker` 循环中。
 
 ## 本地示例
 
@@ -214,4 +236,4 @@ CodeAgent 在 [engines.py](src/agent_base/engines.py) 保留了基于旧 MVP 的
 uv run --frozen pytest -q
 ```
 
-自动测试使用 fake dsh，覆盖任务全流程、Git 固定版本、安装后启动、并发、排队、取消、超时、失败产物、原生会话续接，并通过官方 Python MCP 客户端连接真实管理/业务 MCP server。真实外网 dsh 已另外通过 admin 和示例仓库验收，记录见 [VALIDATION.md](docs/VALIDATION.md)。
+自动测试使用 fake dsh，覆盖任务全流程、Git 固定版本、安装后启动、并发、排队、取消、超时、失败产物、原生会话续接、v3 服务安装/发布/绑定/监督/看护/知识迁移，并通过官方 Python MCP 客户端连接真实管理/业务 MCP server。浏览器回归在 `frontend` 目录执行 `npx playwright test`。阶段二统一验收脚本见上一节；真实 dsh 与本地模型网关链路、现场待验收项记录在 [VALIDATION.md](docs/VALIDATION.md)。

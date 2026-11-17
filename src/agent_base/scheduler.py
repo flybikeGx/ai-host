@@ -70,6 +70,7 @@ class Scheduler:
         self.store = self.service.store
         self.stop_event = threading.Event()
         self.last_service_check = 0
+        self.last_supervisor_tick = 0
         self.last_tick_at = None
         self.last_error_at = None
 
@@ -235,10 +236,36 @@ class Scheduler:
             from .repositories import Repositories
             Repositories(self.service.config).recover()
             self.last_service_check = time.monotonic()
+        if time.monotonic() - self.last_supervisor_tick > 5:
+            # Shared managed deployments have exactly one deterministic
+            # supervision path; v2 repo-private recovery stays above.
+            from .service_supervisor import ServiceSupervisor
+            ServiceSupervisor(self.service.config).tick()
+            self.last_supervisor_tick = time.monotonic()
+            self._guardian_patrol()
         # Drain before cron: a full queue must never block its own dispatcher.
         launched = self.dispatch()
         triggered = self.cron_tick()
         return {"triggered": triggered, "dispatched": launched + self.dispatch()}
+
+    def _guardian_patrol(self):
+        config = self.service.config
+        interval = config.guardian.get("interval_seconds", 300)
+        if not config.guardian.get("enabled"):
+            return
+        state_file = config.data / "guardian" / "last-patrol.json"
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            state = {}
+        if time.time() - state.get("at", 0) < interval:
+            return
+        try:
+            from .guardian import run_guardian_patrol
+            run_guardian_patrol(config, trigger="schedule")
+        except (OSError, ValueError, ImportError):
+            import logging
+            logging.exception("guardian patrol failed; supervision continues")
 
     def run(self):
         import logging

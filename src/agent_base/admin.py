@@ -66,6 +66,12 @@ class Admin:
             deadline = time.time() + self.config.runtime.get("timeout_seconds", 1800)
             from .knowledge_service import attach
             instructions = attach(self.config, patch, env, 'admin', {'admin_session': self.name, 'turn_id': turn_root.name}, deadline, self.workspace)
+            # Authorized admin business access resolves through the same shared
+            # service catalog as runs and conversations.
+            from .service_resolver import ServiceResolver
+            instructions = ServiceResolver(self.config).attach(
+                patch=patch, env=env, workspace=self.workspace, manifest=None,
+                installation=None, actor="admin", deadline=deadline) + instructions
             task.write_text(instructions + (PROJECT / "AGENTS.md").read_text(encoding="utf-8") + "\n\n用户本轮请求：\n" + text, encoding="utf-8")
             stopped = [False]
             old = signal.signal(signal.SIGINT, lambda *_: stopped.__setitem__(0, True))

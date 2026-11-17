@@ -142,8 +142,11 @@ def application(config, item, endpoint):
                     def is_cancelled():
                         current = store.get(run_id)
                         return cancelled.is_set() or current["cancel_requested"] or current["status"] not in {"preparing", "running", "verifying"}
-                    declared = current_credential_names(config) | parse_credential_names(
-                        os.environ.get(CREDENTIAL_NAME_MARKER))
+                    # A Run retains its provider snapshot after global config
+                    # changes, so its credential names must remain blocked too.
+                    declared = (current_credential_names(config)
+                                | declared_credential_names(job["spec"].get("runtime", {}))
+                                | parse_credential_names(os.environ.get(CREDENTIAL_NAME_MARKER)))
                     env = scrub_environment(os.environ, declared)
                     try:
                         code = await asyncio.to_thread(run_process, expand(tool["argv"], package, workspace, python), cwd=workspace, env=env,
