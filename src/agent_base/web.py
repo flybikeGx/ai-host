@@ -144,6 +144,8 @@ def create_app(config, *, background=True):
     api = [Depends(authorize)]
     from .service_web import register as register_services
     register_services(app, config, api)
+    from .mcp_discovery import register as register_mcp_discovery
+    register_mcp_discovery(app, config, api)
     static = Path(__file__).parent / "static" / "chat"
     if (static / "assets").is_dir():
         app.mount("/chat/assets", StaticFiles(directory=static / "assets"), name="chat-assets")

@@ -72,6 +72,11 @@ def main():
     service_bind.add_argument("--repo-source", help="repo:<repo_id> 来源映射")
     service_bind.add_argument("--contract")
     service_commands.add_parser("bindings")
+    mcp = commands.add_parser("mcp", help="MCP 发现：平台全部 MCP 清单与各 Agent 接入配置")
+    mcp_commands = mcp.add_subparsers(dest="mcp_action", required=True)
+    mcp_commands.add_parser("list")
+    mcp_config = mcp_commands.add_parser("config")
+    mcp_config.add_argument("--agent", default="opencode", choices=["dsh", "opencode", "claude-code"])
     register_external = service_commands.add_parser("register-external")
     register_external.add_argument("deployment_id")
     register_external.add_argument("service_id")
@@ -310,6 +315,14 @@ def main():
                                                url=args.url, contract=args.contract,
                                                expected_tools=[t for t in args.tools.split(",") if t.strip()],
                                                headers=headers, owner=args.owner))
+            return
+        if args.action == "mcp":
+            from .mcp_discovery import MCPDiscovery
+            discovery = MCPDiscovery(config)
+            if args.mcp_action == "list":
+                emit(discovery.inventory())
+            else:
+                emit(discovery.agent_config(args.agent))
             return
         from .service import Service
         from .mcp_server import public
