@@ -2,13 +2,13 @@
 
 ## 2026-11-17：MCP 发现本地层与设计文档整合
 
-**背景**：平台全部 MCP 已统一为 Streamable HTTP，但外部 Agent 客户端（opencode、Claude Code 等）没有发现与接入入口。本次新增 `mcp_discovery.py` 发现层；同时因该实现未先对照既有 MCP 发现与托管设计（事实设计并入总纲 §12，远程愿景并入 §17.3；原文见 Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）评审即动手（流程失误），将全部历史设计文档整合为 [系统设计总纲](ARCHITECTURE.md) 并建立"先设计后实现"的变更约定。
+**背景**：平台全部 MCP 已统一为 Streamable HTTP，但外部 Agent 客户端（opencode、Claude Code 等）没有发现与接入入口。本次新增 `mcp_discovery.py` 发现层；同时因该实现未先对照既有 MCP 发现与托管设计（事实设计并入总纲 §12，远程愿景并入 §18.3；原文见 Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）评审即动手（流程失误），将全部历史设计文档整合为 [系统设计总纲](ARCHITECTURE.md) 并建立"先设计后实现"的变更约定。
 
 **实现范围**（设计总纲 §12 为事实设计）：
 
 - `GET /api/mcp` 全量清单（repo/managed/external/builtin/legacy 五类；凭据只引用不返回值）、`GET /api/mcp/config?agent=dsh|opencode|claude-code` 按客户端生成可合并配置片段（opencode `type:remote` + `{env:VAR}`、Claude Code `type:http` + `${VAR}`、dsh patch insert 行）、`GET /.well-known/mcp.json` 最小发现文档、CLI `agent-base mcp list / config`。
 - `POST /api/mcp/grants` 会话授权：面向外部 Agent 的无进程绑定 grant（TTL 60s–24h），复用现有绑定体系；网关逐调用校验绑定存活性、工具白名单与项目范围不变，解绑即时失效。legacy 知识库签发只读 admin 范围；builtin 部署经 `builtin_grant` 按绑定范围签发。
-- 明确边界：repo 命名空间因 `X-Agent-Run` 约束标记不可直连；本层为单用户本机发现，远程 Registry/exposure/OAuth 愿景收敛为总纲 §17.3 路线图，并对原设计（Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）§10.1 的 7 项源码问题做了 2026-11-17 复核（#1/#2/#4/#6 已修，#3/#5/#7 开放）。
+- 明确边界：repo 命名空间因 `X-Agent-Run` 约束标记不可直连；本层为单用户本机发现，远程 Registry/exposure/OAuth 愿景收敛为总纲 §18.3 路线图，并对原设计（Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）§10.1 的 7 项源码问题做了 2026-11-17 复核（#1/#2/#4/#6 已修，#3/#5/#7 开放）。
 
 **验证结果**：
 

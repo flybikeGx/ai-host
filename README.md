@@ -16,7 +16,7 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
 
-搁置设计：用户隔离与多租户（见 [设计总纲](docs/ARCHITECTURE.md) §17.4；草案原文可在 Git 历史中检索，删除前路径 `docs/USER_ISOLATION_DESIGN.md`）。暂不实施，当前仍是单用户实现。
+治理层：身份/RBAC 骨架（域/用户/角色/权限/审计 + `/api/v1` + CLI `control`）已实现，见 [设计总纲](docs/ARCHITECTURE.md) §13。多用户执行强隔离仍暂缓（§18.4；草案原文可在 Git 历史检索，删除前路径 `docs/USER_ISOLATION_DESIGN.md`），当前执行侧仍是单用户实现。
 
 共享服务：第二阶段已实现 MCP 独立托管、发布、显式绑定与看护，使用说明见 [共享 MCP 托管与看护](docs/ManagedServices.md)。MCP 发现与多 Agent 接入（2026-11-17）见设计总纲 §12。仍不建设本地 fetch、GUI 自动接入和集群高可用。
 

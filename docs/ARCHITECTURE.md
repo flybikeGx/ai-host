@@ -18,7 +18,7 @@
 
 Agent Base（AI Host）把一个 Git 仓库变成可以安装、调度和对话的 Agent。仓库提供 `AGENTS.md`、安装清单、skills、MCP 和可选产物检查；Python 基座负责资源、生命周期和交付；CLI 运行时（外网为 DeepSeek Harness，简称 dsh）负责模型推理、工具循环与原生上下文。
 
-更远的立项愿景（个人 AI 能力沉淀为团队共享服务、多用户权限与额度治理）不在当前实现范围内；当前停留在**可信团队、单机、单用户**边界。
+更远的立项愿景（个人 AI 能力沉淀为团队共享服务、多用户权限与额度治理）大部分尚未实现；已落地「身份与权限」治理骨架（§13：域/用户/角色/RBAC/审计），但执行侧仍是**可信团队、单机、单用户**边界，多租户强隔离未实施。
 
 | 使用方式 | 生命周期 | 适合的工作 |
 | --- | --- | --- |
@@ -95,6 +95,7 @@ flowchart TB
 | `dashboard.py`、`resource_metrics.py` | 只读快照、主机/受管进程采样、指标归属 |
 | `admin.py`、`mcp_server.py` | Admin 原生对话、管理 MCP（stdio）、v1 业务工具桥接 |
 | `mcp_discovery.py` | **MCP 发现**：全量清单、各客户端配置片段、会话授权签发（2026-11-17） |
+| `governance/*.py` | **治理层**：域/用户/角色/权限/分组/审计数据模型、令牌、`/api/v1` 控制面（2026-11-17，§13） |
 | `dirlink.py` | 跨平台目录链接（符号链接优先，Windows junction 回退） |
 
 ## 3. 核心设计不变量
@@ -109,7 +110,7 @@ flowchart TB
 6. **结果语义分层**。`verification=structural_only` 仅结构检查；`succeeded` 要求执行器返回有效结构化报告且声明产物/检查通过。模型自报"完成"不覆盖平台状态。
 7. **版本固定 commit**。ref/branch 只用于解析候选；运行与安装永不自动跟随。软件版本、业务契约版本、MCP 协议版本三者独立。
 8. **单一监督者**。每部署同一时刻只有一个活动代际；启停/恢复/升级都经部署锁与代际检查，不存在两个控制器写同一数据目录。
-9. **资源发现隔离不是安全隔离**。目录、venv、命名空间、提示词约束都不阻挡恶意代码；多租户强隔离暂缓（既定方向：每用户独立实例 + 容器执行边界）。
+9. **资源发现隔离不是安全隔离**。目录、venv、命名空间、提示词约束都不阻挡恶意代码。治理层（§13）提供身份/RBAC 数据面，但**不构成执行隔离**；多租户执行强隔离仍暂缓（既定方向：每用户独立实例 + 容器执行边界）。
 10. **发现 API 不返回凭据值**。静态 token 以文件路径引用，会话授权只在签发响应中返回一次。
 
 ## 4. 运行时与模型接入
@@ -170,7 +171,7 @@ flowchart TB
 - React + FastAPI 同进程；原生 session 续接（刷新/切换不取消生成）；消息 `client_key` 幂等；每会话同时一轮、全局活动/排队上限 32；SSE 从 cursor 重放，断线只断订阅。
 - Admin 不占仓库执行位置；repo 每轮关联一个 Run。
 - 页面：`/chat`（对话）、`/dashboard`（仪表盘：MCP/Agent/工作区/系统指标，只读采样）、`/services`（共享服务管理）、`/knowledge`（知识库管理）、`/cron`（定时计划）。
-- Web 安全：默认 loopback 绑定、TrustedHost、跨 Origin 写拒绝、可选 `AGENT_BASE_WEB_TOKEN`；这是本机管理面，不是多用户身份系统。
+- Web 安全：默认 loopback 绑定、TrustedHost、跨 Origin 写拒绝、可选 `AGENT_BASE_WEB_TOKEN`；既有 `/api/*` 仍是本机管理面，多用户身份/RBAC 走独立的 `/api/v1`（§13）。
 - 详见 [WebChat.md](WebChat.md)、[Dashboard.md](Dashboard.md)。
 
 ## 11. Admin MCP 与看护 Agent
@@ -182,7 +183,7 @@ flowchart TB
 ## 12. MCP 发现与多客户端接入（2026-11-17 新增）
 
 > 状态：**已实现并本地验收**。本节是事实设计（as-built）；更大的远程托管愿景（Registry 兼容目录、
-> HTTPS 稳定入口、OAuth 身份）未实现，收敛为路线图，见 §17.3（完整愿景设计见 Git 历史
+> HTTPS 稳定入口、OAuth 身份）未实现，收敛为路线图，见 §18.3（完整愿景设计见 Git 历史
 > docs/MCP_DISCOVERY_HOSTING_DESIGN.md，2026-11-16 版）。
 
 ### 12.1 动机与定位
@@ -220,7 +221,7 @@ flowchart TB
 - **定义**：`{"kind":"call", agent_id, deployment_id, alias, tools, binding_revision, scope}`，**不含** pid/run_id/turn_id；TTL 60s–24h（默认 1h）。
 - **安全性**：无进程绑定不降低实际约束——网关每次调用仍校验 grant 哈希、绑定存活性（解绑即时失效）、工具白名单与项目范围；TTL 到期自动失效。授予是一次性返回，不落任何清单。
 - **知识库**：legacy 实例签发只读 admin 范围 grant（`read_namespace_ids=全部, submit=[]`）；builtin 部署经 `builtin_grant` 按绑定范围签发，授权与签发进程（Web serve）的生命周期关联。
-- **已知边界**：grant 定义中的 `binding_revision` 目前网关**未**逐调用比较（继承自托管网关的既有问题，见 §17.3 第 5 项）；会话授权同样受此影响——减权靠解绑的即时撤销保证，修订号比较仍待实现。
+- **已知边界**：grant 定义中的 `binding_revision` 目前网关**未**逐调用比较（继承自托管网关的既有问题，见 §18.3 第 5 项）；会话授权同样受此影响——减权靠解绑的即时撤销保证，修订号比较仍待实现。
 
 ### 12.5 已验收边界
 
@@ -228,11 +229,51 @@ flowchart TB
 - 真实数据端到端：发现 → 签发 → Streamable HTTP 连接 → `knowledge_catalog` 调用成功。
 - 实施中发现并处理：本机知识库常驻服务为 11-11 启动的旧代码（早于 admin-grant 兼容提交 43e45db），重启后恢复。
 
-## 13. 数据模型与存储布局
+## 13. 治理层（多用户分权分域）
+
+> 状态：**身份/RBAC 骨架已实现**（`governance/` 包 + `/api/v1` + CLI `control`）；网关、注册中心、资源、执行配额、每域独立实例强隔离仍属设计愿景（见 §18.4）。
+> 定位：把单用户执行基座补足为多用户分权分域的治理平台。执行引擎原样复用，治理层只新增治理语义，为后续在页面上做用户/权限管理、以及每域独立实例的强隔离铺路。本节整合并取代早前的治理层设计草案。
+
+### 13.1 关系与关键裁决
+
+| 裁决 | 内容 |
+| --- | --- |
+| 身份统一 | 执行基座 `workspace_id` ↔ 治理层 `domain_id`，首版 1:1，不在 domain 之下再叠 workspace |
+| 执行不重造 | Agent 执行、Run 状态机、每安装 MCP 网关、知识库、调度复用 agent-base；治理层只新增 RBAC/审计/配额/注册/资源 |
+| 控制面与数据分离 | 治理表（`control.sqlite`）与执行表（`runs.sqlite`/`knowledge.sqlite`）物理分库，不合并单库，避免「全表加归属列」大改造 |
+| 网关双层不合并 | 执行基座每安装网关（绑 Run/installation 做工作区路由）与治理层中央网关（分权分域/审计/限流）职责正交，经服务注册表对接（愿景） |
+| 高内聚低耦合 | 跨层只经 MCP/HTTP 契约或控制面 API，不 import 对端内部实现；依赖单向（治理层→实例→上游） |
+
+### 13.2 已实现（as-built）
+
+| 模块 | 内容 |
+| --- | --- |
+| `governance/store.py` | `ControlStore`：独立 `control.sqlite`（domains/users/roles/permissions/role_permissions/user_domains/user_roles/user_permissions/groups/audit_log）；种子 22 权限 + 6 内置角色（platform_admin/auditor/domain_admin/developer/viewer/service_runner）+ 默认域 |
+| `governance/auth.py` | pbkdf2_sha256 密码哈希、API key 哈希、HMAC-SHA256 签名令牌（`payload.sig`，claims 只放身份） |
+| `governance/rbac.py` | 有效权限 = 角色并集 ∪ 直授 allow − 直授 deny（**deny 优先**）；域/组作用域收窄（NULL=全局/全组） |
+| `governance/service.py` | `Governance` 门面：密钥管理、bootstrap、登录（口令/API key）、域/用户/角色/分组/成员/授权 CRUD、审计、`authorize` |
+| `governance/web.py` | `/api/v1` 路由 + JWT 依赖 + 权限门控（`x-domain-id` 定域）：auth/login、auth/api-key、me、permissions、domains、users、roles、groups、memberships、grants、audit |
+| `cli.py::control` | `init`（引导 admin）/ users / roles / domains / permissions / audit |
+
+- **零新依赖**：仅 stdlib `sqlite3` + `hashlib/hmac`，不引入 SQLAlchemy/PyJWT/passlib。
+- **非侵入**：独立 `control.sqlite`、独立 `/api/v1`、独立令牌，不触碰既有 `/api/*`（仍走 `AGENT_BASE_WEB_TOKEN`）与单用户执行逻辑。
+
+### 13.3 关键设计决策
+
+- **deny 优先**：直授 deny 覆盖角色/直授 allow（`role ∪ allow − deny`）。
+- **JWT 只放身份**：权限以数据库为权威，令牌不含权限集合，吊销/减权即时生效。
+- **域/组作用域**：授权记录 `domain_id`/`group_id` 可空（= 全局/全组），SQL 以 `IS NULL OR =?` 收窄。
+
+### 13.4 融合接缝与愿景
+
+首版只落地「身份与权限」，与执行层的耦合面为：**控制面 API**（`/api/v1/*`）、**实例注册/发现**（`workspace_id↔domain_id↔实例` 绑定）、**执行契约**（`submit(task)` → run_id + 状态流，复用 `agent-report-v1.schema.json`）、**审计 trace_id 传播**（网关级/Agent 级同一 trace_id 关联双层）、**鉴权/身份注入**（实例二次校验 workspace 绑定，用户 token 不透传 CLI/MCP）。网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、企业内网账号验证、每域独立实例执行强隔离等接缝随愿景阶段实施（§18.4）。
+
+## 14. 数据模型与存储布局
 
 ```text
 .agent-base/
   runs.sqlite                 队列/任务/事件/对话/repo 安装/服务目录（service_* v2 表）/grant 哈希
+  control.sqlite              治理面：域/用户/角色/权限/分组/审计（与执行库分离，§13）
   knowledge/knowledge.sqlite  知识库（或 builtin 部署各自的 data_root）
   repos/<repo_id>/installations/<installation_id>/
     source/ env/ receipt.json token service.json dependencies.log install-N.log service.log
@@ -244,7 +285,7 @@ flowchart TB
 
 `service_store.py` v2 schema（`platform_migrations` 版本化）：`services / service_revisions / deployments / service_operations / agent_identities / agent_identity_sources / service_bindings / service_incidents / service_health_events / service_grants / platform_settings`。所有表向后兼容 v1/v2 数据。
 
-## 14. 安全模型汇总
+## 15. 安全模型汇总
 
 | 凭据 | 持有者 | 传递方式 | 撤销 |
 | --- | --- | --- | --- |
@@ -256,9 +297,9 @@ flowchart TB
 | 会话 grant（新） | 外部客户端（签发响应一次性获得） | Bearer | 解绑即时 / TTL 到期 |
 | 知识库 grant | 同上两种来源 | Bearer | `revoke_actor` / 绑定停用 |
 
-边界声明：Web API 是本机管理面（loopback + 可选 token），不是多用户身份系统；目录/venv/命名空间不是安全沙箱；名称过滤不是恶意代码防护。多用户与强隔离暂缓（方向：每用户独立实例 + 容器执行边界）。
+边界声明：既有 Web API 是本机管理面（loopback + 可选 token）；治理层 `/api/v1`（§13）提供身份/RBAC 数据面，但不是执行隔离——目录/venv/命名空间不是安全沙箱，名称过滤不是恶意代码防护。多用户执行强隔离仍暂缓（方向：每用户独立实例 + 容器执行边界）。
 
-## 15. 协议与技术基线
+## 16. 协议与技术基线
 
 | 项目 | 当前选择 |
 | --- | --- |
@@ -271,7 +312,7 @@ flowchart TB
 
 协议注意：Streamable HTTP 传输与 `2026-07-28` 无会话协议是两件事；SDK 升级与双模式兼容列入路线图，未经测试不得声称支持新协议。
 
-## 16. 已知限制
+## 17. 已知限制
 
 - 无操作系统级资源配额、历史/失效安装自动回收、分布式执行、自动业务重试。
 - 网关请求头白名单未含 `MCP-Protocol-Version`（及当前协议的 `Mcp-Method` 等）；授权检查目前只覆盖 `tools/call`（资源/提示未实现——平台也尚未代理这些能力）。
@@ -281,19 +322,19 @@ flowchart TB
 - Windows 真机、真实内网（CodeAgent、企业代理/CA、真实工单后端）为现场待验收项。
 - 知识库扩展（Installation 声明式绑定、分层过滤、自动退避恢复、导入导出）未实现。
 
-## 17. 演进路线
+## 18. 演进路线
 
-### 17.1 已完成
+### 18.1 已完成
 
 第一阶段（repo 协议 v1/v2、调度、网页对话、仪表盘、知识库首版）、第二阶段（共享 MCP v3 全链路：安装/发布/绑定/网关/监督/看护/知识库迁移）、MCP 发现本地层（§12）。验收记录见 [VALIDATION.md](VALIDATION.md)。
 
-### 17.2 进行中/待实施工单
+### 18.2 进行中/待实施工单
 
 - **工单 003：Agent 升级、唯一活动版本与对话迁移**（`tickets/003-phase-3-agent-upgrades.md`，待实施）。同一平台 Agent 单一活动版本；升级 = 准备新版 → 冻结旧执行入口 → 排空 → 迁移会话 → 切换验证 → 回收。
 - **P0 · RuntimeAdapter 重构**：CLI 适配逻辑散布于调用方，抽出能力声明/命令/环境/挂载/事件统一接口。CodeAgent 完整接入依赖此项。
 - **P0 · CodeAgent 现场探测与接入**、**内网依赖交付**（镜像/离线缓存/企业 CA）。
 
-### 17.3 MCP 远程托管愿景（自存档设计收敛，未排期）
+### 18.3 MCP 远程托管愿景（自存档设计收敛，未排期）
 
 目标形态：私有 Registry 兼容读接口（`server.json`/目录 API/分页与增量事件）→ exposure 稳定 HTTPS 入口（`/mcp/{exposure_id}`，URL 不随代际/端口变化）→ 远程身份（组织 IdP/OAuth、工作负载主体）→ 统一策略与外部服务代理。分期 P0（收敛基线）→ P1（发现与稳定入口）→ P2（远程身份）→ P3（客户端与协议验收），估算 15–25 人日；完整分期设计与官方规范参考见 Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md。
 
@@ -311,11 +352,13 @@ flowchart TB
 
 进入 P1 前应先关闭 #3、#5；#7 与远程身份（P2）一并设计。
 
-### 17.4 暂缓
+### 18.4 暂缓
 
 多用户与用户隔离（既定方向为独立实例 + 容器执行边界）；集群高可用、多租户强隔离、服务市场、自建授权服务器。
 
-## 18. 关键设计决策记录
+治理层进展：身份/RBAC/域骨架已实现（§13）；网关反向代理、服务注册中心、资源连接器、AgentPool 配额、filestore 中转、企业内网账号验证、每域独立实例执行强隔离仍暂缓。
+
+## 19. 关键设计决策记录
 
 | 决策 | 理由 |
 | --- | --- |
@@ -330,7 +373,7 @@ flowchart TB
 | 发现配置按客户端分别导出 | 各客户端配置格式与 env 展开语法不同（`{env:}` / `${}` / `!!js`）；不虚构统一 `mcpServers` 标准 |
 | 每部署独立网关而非中央代理 | 授权与协议语义在部署边界执行；中央入口留给远程托管阶段（P1 exposure）再评估 |
 
-## 19. 文档地图
+## 20. 文档地图
 
 ```text
 README.md（根）          项目入口

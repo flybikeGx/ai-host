@@ -36,6 +36,16 @@ def alive(pid: int | None, birth: float | None) -> bool:
         return False
 
 
+def _wait_gone(pid: int, birth: float | None, timeout: float = 5.0) -> bool:
+    """等待进程真正退出，覆盖 SIGKILL 后内核尚未将其标记为死/zombie 的窗口。"""
+    deadline = time.time() + timeout
+    while alive(pid, birth):
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def kill_tree(pid: int, birth: float | None):
     if not alive(pid, birth):
         return
@@ -55,6 +65,7 @@ def kill_tree(pid: int, birth: float | None):
                     # an empty group after SIGTERM has already stopped it.
                     if alive(pid, birth):
                         raise
+                _wait_gone(pid, birth)
                 return
         except ProcessLookupError:
             return
@@ -76,6 +87,7 @@ def kill_tree(pid: int, birth: float | None):
                 proc.kill()
             except psutil.Error:
                 pass
+        _wait_gone(pid, birth)
     except (psutil.Error, OSError):
         pass
 

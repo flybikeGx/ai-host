@@ -119,6 +119,8 @@ def create_app(config, *, background=True):
     app.state.dashboard = dashboard
     from .knowledge_web import register as register_knowledge
     register_knowledge(app, config)
+    from .governance.web import register as register_governance
+    register_governance(app, config)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")

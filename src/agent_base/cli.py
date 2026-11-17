@@ -26,6 +26,12 @@ def main():
     opening.add_argument('--port', type=int, default=8765)
     knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
     knowledge.add_argument('knowledge_action', choices=['status','start','stop','restart'])
+    control = commands.add_parser('control', help='治理面：域/用户/角色/RBAC/审计控制面')
+    control_actions = control.add_subparsers(dest='control_action', required=True)
+    control_init = control_actions.add_parser('init', help='引导：种子内置角色 + 创建 admin 平台管理员')
+    control_init.add_argument('--admin-password', help='初始 admin 密码；缺省时自动生成并在首次创建时输出')
+    for control_name in ('users', 'roles', 'domains', 'permissions', 'audit'):
+        control_actions.add_parser(control_name)
     repo = commands.add_parser("repo", help="管理 repo 长期安装、skills 和常驻 MCP")
     repo_actions = repo.add_subparsers(dest="repo_action", required=True)
     repo_install = repo_actions.add_parser("install")
@@ -154,6 +160,32 @@ def main():
             if args.knowledge_action == 'status':
                 result = service.status()
             emit(result)
+            return
+        if args.action == 'control':
+            import secrets
+            from .governance.service import Governance
+            gov = Governance(config)
+            if args.control_action == 'init':
+                password = args.admin_password or os.environ.get('AGENT_BASE_ADMIN_PASSWORD')
+                generated = False
+                if password is None:
+                    password = secrets.token_urlsafe(12)
+                    generated = True
+                result = gov.bootstrap(admin_password=password)
+                if result['admin_created'] and generated:
+                    result['admin_password'] = password
+                    result['note'] = '初始密码仅本次输出，请妥善保存后可通过 Web 修改'
+                emit(result)
+            elif args.control_action == 'users':
+                emit(gov.list_users())
+            elif args.control_action == 'roles':
+                emit(gov.list_roles())
+            elif args.control_action == 'domains':
+                emit(gov.list_domains())
+            elif args.control_action == 'permissions':
+                emit(gov.list_permissions())
+            elif args.control_action == 'audit':
+                emit(gov.list_audit())
             return
         if args.action == "_chat_execute":
             from .conversations import Conversations
