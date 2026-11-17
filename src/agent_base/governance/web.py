@@ -9,6 +9,8 @@ from __future__ import annotations
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .gateway import Gateway
+from .registry import ServiceRegistry
 from .service import Governance
 
 
@@ -80,9 +82,36 @@ class PermissionGrantInput(BaseModel):
     group_id: str | None = None
 
 
+class ServiceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain_id: str
+    name: str
+    transport: str = "remote"
+    endpoint: str | dict | None = None
+    group_id: str | None = None
+    credential_ref: str | None = None
+    description: str = ""
+
+
+class ServiceToolsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tools: list[dict] = Field(default_factory=list)
+
+
+class GatewayCallInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    service_id: str
+    tool: str
+    arguments: dict = Field(default_factory=dict)
+
+
 def register(app: FastAPI, config):
     gov = Governance(config)
+    registry = ServiceRegistry(gov.store)
+    gateway = Gateway(gov, registry)
     app.state.governance = gov
+    app.state.registry = registry
+    app.state.gateway = gateway
     gov.bootstrap()
 
     def current_user(authorization: str | None = Header(default=None)) -> dict:
@@ -219,3 +248,71 @@ def register(app: FastAPI, config):
     def list_audit(domain_id: str | None = None, user_id: str | None = None, trace_id: str | None = None,
                    limit: int = 100, _: dict = Depends(permission("audit.read"))):
         return gov.list_audit(domain_id=domain_id, user_id=user_id, trace_id=trace_id, limit=limit)
+
+    # ---- 服务注册中心 ----
+    @app.get("/api/v1/registry/services")
+    def registry_list(domain_id: str | None = None, request: Request = None,
+                      _: dict = Depends(permission("service.read"))):
+        scope = domain_id or (request.headers.get("x-domain-id") if request else None)
+        return registry.list(scope)
+
+    @app.post("/api/v1/registry/services", status_code=201)
+    def registry_register(body: ServiceInput, payload: dict = Depends(permission("service.write")),
+                          who: str = Depends(actor)):
+        return registry.register(body.domain_id, body.name, body.transport, body.endpoint or "",
+                                 group_id=body.group_id, credential_ref=body.credential_ref,
+                                 description=body.description, actor=who, trace_id=payload.get("jti"))
+
+    @app.get("/api/v1/registry/services/{service_id}")
+    def registry_get(service_id: str, _: dict = Depends(permission("service.read"))):
+        return registry.get(service_id)
+
+    @app.patch("/api/v1/registry/services/{service_id}")
+    def registry_update(service_id: str, body: dict, payload: dict = Depends(permission("service.write")),
+                        who: str = Depends(actor)):
+        allowed = {"name", "transport", "endpoint", "credential_ref", "group_id", "status", "description"}
+        return registry.update(service_id, actor=who, trace_id=payload.get("jti"),
+                               **{k: body[k] for k in allowed if k in body})
+
+    @app.delete("/api/v1/registry/services/{service_id}")
+    def registry_remove(service_id: str, payload: dict = Depends(permission("service.manage")),
+                        who: str = Depends(actor)):
+        registry.remove(service_id, actor=who, trace_id=payload.get("jti"))
+        return {"ok": True}
+
+    @app.put("/api/v1/registry/services/{service_id}/tools")
+    def registry_tools(service_id: str, body: ServiceToolsInput,
+                       payload: dict = Depends(permission("service.write")), who: str = Depends(actor)):
+        return registry.set_tools(service_id, body.tools, actor=who, trace_id=payload.get("jti"))
+
+    @app.post("/api/v1/registry/services/{service_id}/check")
+    def registry_check(service_id: str, payload: dict = Depends(permission("service.read")),
+                       who: str = Depends(actor)):
+        return registry.check(service_id, actor=who, trace_id=payload.get("jti"))
+
+    @app.get("/api/v1/registry/services/{service_id}/server-json")
+    def registry_server_json(service_id: str, _: dict = Depends(permission("service.read"))):
+        return registry.server_json(service_id)
+
+    # ---- 网关 ----
+    @app.post("/api/v1/gateway/call")
+    def gateway_call(body: GatewayCallInput, payload: dict = Depends(current_user), request: Request = None):
+        try:
+            return gateway.call(service_id=body.service_id, tool=body.tool, arguments=body.arguments,
+                                user_id=payload["sub"],
+                                domain_id=request.headers.get("x-domain-id") if request else None,
+                                trace_id=payload.get("jti"))
+        except PermissionError as error:
+            raise HTTPException(403, str(error))
+        except ValueError as error:
+            raise HTTPException(404, str(error))
+
+    @app.api_route("/api/v1/gateway/services/{service_id}/mcp", methods=["GET", "POST", "DELETE"])
+    async def gateway_relay(service_id: str, request: Request, payload: dict = Depends(current_user)):
+        try:
+            return await gateway.relay(service_id=service_id, user_id=payload["sub"], request=request,
+                                       trace_id=payload.get("jti"))
+        except PermissionError as error:
+            raise HTTPException(403, str(error))
+        except ValueError as error:
+            raise HTTPException(404, str(error))

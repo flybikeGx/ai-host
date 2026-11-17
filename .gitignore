@@ -17,6 +17,7 @@ agent-base.*.toml
 .pypirc
 .netrc
 .DS_Store
+.idea/
 .mypy_cache/
 .ruff_cache/
 .coverage

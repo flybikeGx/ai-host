@@ -30,8 +30,10 @@ def main():
     control_actions = control.add_subparsers(dest='control_action', required=True)
     control_init = control_actions.add_parser('init', help='引导：种子内置角色 + 创建 admin 平台管理员')
     control_init.add_argument('--admin-password', help='初始 admin 密码；缺省时自动生成并在首次创建时输出')
-    for control_name in ('users', 'roles', 'domains', 'permissions', 'audit'):
+    for control_name in ('users', 'roles', 'domains', 'permissions', 'audit', 'services'):
         control_actions.add_parser(control_name)
+    control_check = control_actions.add_parser('service-check', help='探测已注册服务健康并落库')
+    control_check.add_argument('service_id')
     repo = commands.add_parser("repo", help="管理 repo 长期安装、skills 和常驻 MCP")
     repo_actions = repo.add_subparsers(dest="repo_action", required=True)
     repo_install = repo_actions.add_parser("install")
@@ -186,6 +188,12 @@ def main():
                 emit(gov.list_permissions())
             elif args.control_action == 'audit':
                 emit(gov.list_audit())
+            elif args.control_action == 'services':
+                from .governance.registry import ServiceRegistry
+                emit(ServiceRegistry(gov.store).list())
+            elif args.control_action == 'service-check':
+                from .governance.registry import ServiceRegistry
+                emit(ServiceRegistry(gov.store).check(args.service_id))
             return
         if args.action == "_chat_execute":
             from .conversations import Conversations

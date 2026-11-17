@@ -117,9 +117,29 @@ CREATE TABLE IF NOT EXISTS audit_log (
     level TEXT NOT NULL DEFAULT 'gateway', action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
     at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS services (
+    id TEXT PRIMARY KEY, domain_id TEXT NOT NULL, group_id TEXT,
+    name TEXT NOT NULL, transport TEXT NOT NULL DEFAULT 'remote',
+    endpoint TEXT NOT NULL DEFAULT '', credential_ref TEXT,
+    status TEXT NOT NULL DEFAULT 'active', description TEXT NOT NULL DEFAULT '',
+    created REAL NOT NULL, updated REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS service_tools (
+    id TEXT PRIMARY KEY, service_id TEXT NOT NULL, name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(service_id, name)
+);
+CREATE TABLE IF NOT EXISTS service_checks (
+    id TEXT PRIMARY KEY, service_id TEXT NOT NULL,
+    healthy INTEGER NOT NULL DEFAULT 0, latency REAL, checked_at REAL NOT NULL,
+    error TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS user_roles_user ON user_roles(user_id, is_active);
 CREATE INDEX IF NOT EXISTS user_permissions_user ON user_permissions(user_id, is_active);
 CREATE INDEX IF NOT EXISTS audit_at ON audit_log(at);
+CREATE INDEX IF NOT EXISTS services_domain ON services(domain_id);
+CREATE INDEX IF NOT EXISTS service_tools_service ON service_tools(service_id);
+CREATE INDEX IF NOT EXISTS service_checks_service ON service_checks(service_id);
 """
 
 
@@ -455,6 +475,103 @@ class ControlStore:
         for name, effect in rows:
             result[effect].add(name)
         return result
+
+    # ---- 服务注册 ----
+    def create_service(self, domain_id: str, name: str, transport: str = "remote", endpoint: str = "",
+                       *, group_id: str | None = None, credential_ref: str | None = None,
+                       description: str = "") -> dict:
+        if transport not in {"remote", "embedded"}:
+            raise ValueError("transport 只支持 remote / embedded")
+        self.get_domain(domain_id)
+        if group_id is not None:
+            group = self.get_group(group_id)
+            if group["domain_id"] != domain_id:
+                raise ValueError("分组不属于该域")
+        now = time.time()
+        service_id = uuid.uuid4().hex
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO services(id,domain_id,group_id,name,transport,endpoint,credential_ref,status,"
+                "description,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (service_id, domain_id, group_id, name, transport, endpoint, credential_ref, "active",
+                 description, now, now))
+        return self.get_service(service_id)
+
+    def list_services(self, domain_id: str | None = None) -> list[dict]:
+        with self.connection() as conn:
+            if domain_id:
+                rows = conn.execute("SELECT * FROM services WHERE domain_id=? ORDER BY created", (domain_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM services ORDER BY created").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_service(self, service_id: str) -> dict:
+        with self.connection() as conn:
+            return _row(conn, "services", service_id)
+
+    def get_service_by_name(self, domain_id: str, name: str) -> dict | None:
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM services WHERE domain_id=? AND name=?", (domain_id, name)).fetchone()
+        return dict(row) if row else None
+
+    def update_service(self, service_id: str, **fields) -> dict:
+        allowed = {"name", "transport", "endpoint", "credential_ref", "group_id", "status", "description"}
+        if not fields or set(fields) - allowed:
+            raise ValueError("无效服务字段")
+        if "transport" in fields and fields["transport"] not in {"remote", "embedded"}:
+            raise ValueError("transport 只支持 remote / embedded")
+        if "group_id" in fields and fields["group_id"] is not None:
+            group = self.get_group(fields["group_id"])
+            if group["domain_id"] != self.get_service(service_id)["domain_id"]:
+                raise ValueError("分组不属于该域")
+        fields["updated"] = time.time()
+        with self.connection() as conn:
+            conn.execute(f"UPDATE services SET {','.join(k + '=?' for k in fields)} WHERE id=?",
+                         (*fields.values(), service_id))
+            return _row(conn, "services", service_id)
+
+    def delete_service(self, service_id: str):
+        with self.connection() as conn:
+            conn.execute("DELETE FROM service_tools WHERE service_id=?", (service_id,))
+            conn.execute("DELETE FROM service_checks WHERE service_id=?", (service_id,))
+            conn.execute("DELETE FROM services WHERE id=?", (service_id,))
+
+    def set_tools(self, service_id: str, tools: list[dict]):
+        self.get_service(service_id)
+        with self.connection() as conn:
+            conn.execute("DELETE FROM service_tools WHERE service_id=?", (service_id,))
+            for tool in tools:
+                conn.execute(
+                    "INSERT INTO service_tools(id,service_id,name,description,input_schema) VALUES(?,?,?,?,?)",
+                    (uuid.uuid4().hex, service_id, tool["name"], tool.get("description", ""),
+                     json.dumps(tool.get("input_schema") or {}, ensure_ascii=False)))
+
+    def list_tools(self, service_id: str) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute("SELECT * FROM service_tools WHERE service_id=? ORDER BY name", (service_id,)).fetchall()
+        out = []
+        for r in rows:
+            item = dict(r)
+            item["input_schema"] = json.loads(item["input_schema"]) if item["input_schema"] else {}
+            out.append(item)
+        return out
+
+    def record_check(self, service_id: str, healthy: bool, latency: float | None, error: str = "") -> dict:
+        check_id = uuid.uuid4().hex
+        checked_at = time.time()
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO service_checks(id,service_id,healthy,latency,checked_at,error) VALUES(?,?,?,?,?,?)",
+                (check_id, service_id, 1 if healthy else 0, latency, checked_at, error))
+        return {"id": check_id, "service_id": service_id, "healthy": healthy, "latency": latency,
+                "checked_at": checked_at, "error": error}
+
+    def list_checks(self, service_id: str, limit: int = 50) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM service_checks WHERE service_id=? ORDER BY checked_at DESC LIMIT ?",
+                (service_id, limit)).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- 审计 ----
     def audit(self, *, domain_id: str | None, user_id: str | None, trace_id: str | None, level: str,
