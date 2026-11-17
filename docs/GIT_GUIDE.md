@@ -9,7 +9,7 @@
 | Python/React 源码、测试、演示仓库模板 | `.venv`、node_modules、dsh 本地安装 |
 | `uv.lock`、两个 npm package-lock | `.agent-base` 及其他本机状态目录 |
 | 构建好的 `src/agent_base/static/chat` | 数据库、对话、session、日志、业务产物 |
-| 设计书、迁移说明、筛选后的两张截图 | 本机 `agent-base.toml`、额外本机配置、`.env` |
+| 设计总纲、迁移说明、`docs/assets` 界面截图 | 本机 `agent-base.toml`、额外本机配置、`.env` |
 | `config/*.example.toml` | 个人 CLI 登录目录、真实 API key/token |
 
 `.gitignore` 已覆盖默认生成目录、配置、环境文件和常见测试缓存；`.gitattributes` 统一文本为 LF，图片作为二进制。自定义 storage.root 时，若不使用已忽略的 `.agent-base-*` 目录，要把该路径加入本机忽略规则。

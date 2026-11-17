@@ -84,4 +84,4 @@ namespace 与安装版本分开，一个项目可以绑定多个 repo。相同 r
 
 <img src="assets/knowledge-mobile.png" alt="手机知识库" width="300" />
 
-设计依据见 [KNOWLEDGE_BASE_DESIGN.md](KNOWLEDGE_BASE_DESIGN.md)，验证记录见 [VALIDATION.md](VALIDATION.md)。
+设计总纲见 [ARCHITECTURE.md](ARCHITECTURE.md) §9；首版设计已并入总纲，原文见 Git 历史 docs/KNOWLEDGE_BASE_DESIGN.md；验证记录见 [VALIDATION.md](VALIDATION.md)。

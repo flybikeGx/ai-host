@@ -6,9 +6,9 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 文档目录：[docs/README.md](docs/README.md)。
 
-完整说明：[项目设计书与 TODO](docs/DESIGN.md) · [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](docs/GIT_GUIDE.md) · [验收记录](docs/VALIDATION.md)。
+完整说明：[系统设计总纲](docs/ARCHITECTURE.md)（唯一权威设计文档：架构、各子系统设计、安全模型、已知限制与演进路线） · [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](docs/GIT_GUIDE.md) · [验收记录](docs/VALIDATION.md)。
 
-汇报材料：[项目设计书草稿](docs/PROJECT_DESIGN_DRAFT.md)，按立项口径说明建设目标、服务场景、总体架构、模块职责、核心流程、权限治理与敏捷建设路径。
+汇报材料：立项口径的建设目标、服务场景与权限治理说明已并入 [系统设计总纲](docs/ARCHITECTURE.md)；原项目设计书草稿可在 Git 历史中检索（删除前路径 `docs/PROJECT_DESIGN_DRAFT.md`）。
 
 网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[共享服务](docs/ManagedServices.md)、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
 
@@ -16,9 +16,9 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
 
-搁置设计：[用户隔离草案](docs/USER_ISOLATION_DESIGN.md)（暂不实施，当前仍是单用户实现）。
+搁置设计：用户隔离与多租户（见 [设计总纲](docs/ARCHITECTURE.md) §17.4；草案原文可在 Git 历史中检索，删除前路径 `docs/USER_ISOLATION_DESIGN.md`）。暂不实施，当前仍是单用户实现。
 
-共享服务：第二阶段已实现 MCP 独立托管、发布、显式绑定与看护，使用说明见 [共享 MCP 托管与看护](docs/ManagedServices.md)，设计背景见 [第二阶段设计](docs/PHASE_2_MANAGED_MCP_DESIGN.md)。仍不建设本地 fetch、GUI 自动接入和集群高可用。
+共享服务：第二阶段已实现 MCP 独立托管、发布、显式绑定与看护，使用说明见 [共享 MCP 托管与看护](docs/ManagedServices.md)。MCP 发现与多 Agent 接入（2026-11-17）见设计总纲 §12。仍不建设本地 fetch、GUI 自动接入和集群高可用。
 
 ## Repo 引入与无人值守入口
 
@@ -106,6 +106,17 @@ UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen python scripts/validate_ma
 ```
 
 清单字段、状态机、监督/看护默认值、知识库迁移和管理页说明见 [ManagedServices.md](docs/ManagedServices.md)。
+
+## MCP 发现与多 Agent 接入
+
+平台把全部 MCP（repo 命名空间、共享部署、外部登记、内置知识库）统一为 Streamable HTTP 端点，并通过发现 API 暴露清单与接入方法：
+
+- `GET /api/mcp`：全部 MCP 的端点、状态、工具目录、鉴权方式与使用约束（凭据只给引用，不返回值）。
+- `GET /api/mcp/config?agent=dsh|opencode|claude-code`：生成对应客户端的可合并配置片段（opencode `mcp.<name>.type=remote` + `{env:VAR}`、Claude Code `mcpServers.<name>.type=http` + `${VAR}`、dsh patch insert 行）。
+- `POST /api/mcp/grants`：为外部 Agent 签发会话授权（TTL 60s–24h），只对已发布、运行中且有启用绑定的共享部署；builtin 知识库按绑定签发，不做发布状态检查。工具/项目范围与绑定存活性仍在网关逐调用校验，解绑立即失效。
+- `GET /.well-known/mcp.json`：标准风格的最小发现文档（name + url + 描述）。
+
+repo 命名空间的业务工具必须关联活跃 Run（`X-Agent-Run`），由平台任务自动挂载，外部 Agent 只能浏览其工具目录。CLI 同步提供 `agent-base mcp list` 与 `agent-base mcp config --agent <client>`。
 
 ## Web / cron 工作调度
 

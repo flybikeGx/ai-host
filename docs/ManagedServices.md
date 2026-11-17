@@ -2,7 +2,7 @@
 
 第二阶段把 MCP 从「某个 Agent repo 的私有常驻进程」提升为平台管理的共享服务：一份部署可被多个 Agent 显式绑定，Agent 升级、停止或卸载不会停止它。Admin 通过管理 MCP 完成准备、安装、验证、发布和绑定；确定性监督器持续探测并按预算恢复；看护 Agent 通过受限工具诊断和修复；管理页集中展示状态、故障和资源。
 
-本页描述**已实现并本地验收**的行为。设计背景、目标与非目标见 [PHASE_2_MANAGED_MCP_DESIGN.md](PHASE_2_MANAGED_MCP_DESIGN.md)。
+本页描述**已实现并本地验收**的行为。设计总纲（对象模型、授权不变量与演进路线）见 [ARCHITECTURE.md](ARCHITECTURE.md) §8；原始设计背景见 Git 历史 docs/PHASE_2_MANAGED_MCP_DESIGN.md。
 
 ## 1. 边界
 

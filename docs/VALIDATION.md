@@ -1,5 +1,23 @@
 # 初版验证记录
 
+## 2026-11-17：MCP 发现本地层与设计文档整合
+
+**背景**：平台全部 MCP 已统一为 Streamable HTTP，但外部 Agent 客户端（opencode、Claude Code 等）没有发现与接入入口。本次新增 `mcp_discovery.py` 发现层；同时因该实现未先对照既有 MCP 发现与托管设计（事实设计并入总纲 §12，远程愿景并入 §17.3；原文见 Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）评审即动手（流程失误），将全部历史设计文档整合为 [系统设计总纲](ARCHITECTURE.md) 并建立"先设计后实现"的变更约定。
+
+**实现范围**（设计总纲 §12 为事实设计）：
+
+- `GET /api/mcp` 全量清单（repo/managed/external/builtin/legacy 五类；凭据只引用不返回值）、`GET /api/mcp/config?agent=dsh|opencode|claude-code` 按客户端生成可合并配置片段（opencode `type:remote` + `{env:VAR}`、Claude Code `type:http` + `${VAR}`、dsh patch insert 行）、`GET /.well-known/mcp.json` 最小发现文档、CLI `agent-base mcp list / config`。
+- `POST /api/mcp/grants` 会话授权：面向外部 Agent 的无进程绑定 grant（TTL 60s–24h），复用现有绑定体系；网关逐调用校验绑定存活性、工具白名单与项目范围不变，解绑即时失效。legacy 知识库签发只读 admin 范围；builtin 部署经 `builtin_grant` 按绑定范围签发。
+- 明确边界：repo 命名空间因 `X-Agent-Run` 约束标记不可直连；本层为单用户本机发现，远程 Registry/exposure/OAuth 愿景收敛为总纲 §17.3 路线图，并对原设计（Git 历史 docs/MCP_DISCOVERY_HOSTING_DESIGN.md）§10.1 的 7 项源码问题做了 2026-11-17 复核（#1/#2/#4/#6 已修，#3/#5/#7 开放）。
+
+**验证结果**：
+
+- 新增 `tests/test_mcp_discovery.py` 6 项：清单覆盖各 kind 与凭据不落值、三种客户端片段、repo 命名空间平台专用语义、会话授权真实网关调用与解绑即时失效（401）、参数校验、legacy 知识库授权真实 MCP 调用。
+- `uv run pytest -q tests tickets/acceptance`：**244 passed**，1 个既有弃用提示，239.43 秒（项目测试 223 项含新增 6 项、第一阶段验收与独立复现 21 项）。
+- 真实数据端到端：发现 → 签发 → Streamable HTTP 连接 → `knowledge_catalog` 调用成功。过程中发现本机知识库常驻服务为 11-11 启动的旧代码（早于 admin-grant 兼容提交 43e45db），`agent-base knowledge restart` 后恢复；该服务重启属运维动作，未改动数据。
+- 文档整合：6 个历史设计文档已并入 [系统设计总纲](ARCHITECTURE.md) 并从 docs/ 根删除（原文保留在 Git 历史，删除前路径见总纲开头）；根 README、docs 索引、Knowledge/ManagedServices 与工单引用同步改为指向总纲或 Git 历史。
+- Playwright 本轮未执行（改动不涉及前端）；现场待验收项不变。
+
 ## 2026-11-17：工单 002 再次边界复验修复（F2/F6）
 
 独立复验在第 14 节的相邻边界中发现 2 个 P1，已修复并加入正式回归。

@@ -2,7 +2,7 @@
 
 2026-11-10 更新：新对话统一从 AGENTS 列表发起，最近对话新增独立的 Agent 筛选；Cmd/Ctrl+K 定位 Agent 列表。左侧“定时任务”进入独立 `/cron` 页面。最新交互与计划说明见 [SchedulingUI.md](SchedulingUI.md)。
 
-启动现有 Web 服务后访问 <http://127.0.0.1:8765/chat>。原工作调度和 Repo 资源页面仍在首页，两个页面互相有入口。
+启动现有 Web 服务后访问 <http://127.0.0.1:8765/chat>。原工作调度和 Repo 资源页面已迁到 `/workbench`，首页 `/` 跳转仪表盘；页面之间互相有入口。
 
 ```sh
 .venv/bin/agent-base serve --port 8765
