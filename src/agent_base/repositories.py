@@ -91,7 +91,7 @@ class Repositories:
         with self.store.connection() as conn:
             conn.execute(f"UPDATE repo_installations SET {','.join(k+'=?' for k in fields)} WHERE id=?", (*fields.values(), installation_id))
 
-    def install(self, origin, ref=None, *, checkout=None, commit=None, deadline=None, cancelled=lambda: False):
+    def install(self, origin, ref=None, *, checkout=None, commit=None, deadline=None, cancelled=lambda: False, domain_id=None):
         origin = str(Path(origin).expanduser().resolve()) if Path(origin).expanduser().exists() else origin
         if not origin or origin.startswith("-"):
             raise ValueError("无效仓库")
@@ -118,14 +118,14 @@ class Repositories:
                     commit = result.stdout.strip()
                     subprocess.run(["git", "-C", str(clone), "-c", "core.hooksPath=" + os.devnull, "checkout", "--detach", commit],
                                    check=True, capture_output=True, timeout=max(0.1, deadline-time.time()))
-                    item = self._install_checkout(origin, ref, repo_id, clone, commit, deadline, cancelled)
+                    item = self._install_checkout(origin, ref, repo_id, clone, commit, deadline, cancelled, domain_id)
                 finally:
                     shutil.rmtree(clone, ignore_errors=True)
             else:
-                item = self._install_checkout(origin, ref, repo_id, checkout, commit, deadline, cancelled)
+                item = self._install_checkout(origin, ref, repo_id, checkout, commit, deadline, cancelled, domain_id)
         return item
 
-    def _install_checkout(self, origin, ref, repo_id, checkout, commit, deadline, cancelled):
+    def _install_checkout(self, origin, ref, repo_id, checkout, commit, deadline, cancelled, domain_id=None):
         manifest = load_package(checkout)
         if manifest["schema_version"] not in {2, 3}:
             raise ValueError("repo 长期安装要求 schema_version: 2 或 3；旧清单仍可使用原有 run/install")
@@ -153,6 +153,8 @@ class Repositories:
         with self.store.connection() as conn:
             conn.execute("INSERT OR REPLACE INTO repo_installations(id,repo_id,origin,commit_sha,root,manifest,status,created) VALUES(?,?,?,?,?,?,'installing',?)",
                 (digest, repo_id, origin, commit, str(install_root), json.dumps(manifest), time.time()))
+            if domain_id is not None:
+                conn.execute("UPDATE repo_installations SET domain_id=? WHERE id=?", (domain_id, digest))
         try:
             python = sys.executable
             # Repo code (dependency resolution and installation steps) never

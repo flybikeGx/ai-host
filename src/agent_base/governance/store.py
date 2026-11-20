@@ -595,11 +595,10 @@ class ControlStore:
     # ---- 审计 ----
     def audit(self, *, domain_id: str | None, user_id: str | None, trace_id: str | None, level: str,
               action: str, detail: dict | None = None):
+        from ..chat_audit import insert  # local import keeps governance/store import-only
         with self.connection() as conn:
-            conn.execute("INSERT INTO audit_log(id,domain_id,user_id,trace_id,level,action,detail,at)"
-                         " VALUES(?,?,?,?,?,?,?,?)",
-                         (uuid.uuid4().hex, domain_id, user_id, trace_id, level, action,
-                          json.dumps(detail or {}, ensure_ascii=False), time.time()))
+            insert(conn, action=action, domain_id=domain_id, user_id=user_id, trace_id=trace_id,
+                   level=level, detail=detail or {})
 
     def list_audit(self, *, domain_id: str | None = None, user_id: str | None = None,
                    trace_id: str | None = None, limit: int = 100) -> list[dict]:

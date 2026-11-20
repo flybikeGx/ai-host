@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,ArrowUpRight,Check,Eye,EyeOff,LoaderCircle,LogOut,ShieldCheck,User} from 'lucide-react';
-import {api} from './api';
+import {api,currentDomain,selectDomain} from './api';
 import './auth.css';
 
 const destinations=['/dashboard','/chat','/cron','/knowledge','/services','/workbench'];
@@ -8,6 +8,31 @@ function returnPath(value){
   if(!value?.startsWith('/')||value.startsWith('//'))return '/dashboard';
   try{const url=new URL(value,location.origin);return url.origin===location.origin&&destinations.includes(url.pathname)?url.pathname+url.search+url.hash:'/dashboard';}
   catch{return '/dashboard';}
+}
+
+// §7.2: the selector defaults to the stored value, then the home domain, then
+// the only joined domain. The server still validates every request; this only
+// picks the initial value. A multi-domain user without a home domain must pick
+// one before page requests stop returning domain_required.
+function preferredDomain(identity){
+  const list=identity?.domains||[],ids=list.map(domain=>domain.id),stored=currentDomain();
+  if(stored&&ids.includes(stored))return stored;
+  if(identity?.home_domain_id&&ids.includes(identity.home_domain_id))return identity.home_domain_id;
+  return ids[0]||'';
+}
+
+// The page gates only on `domains[].permissions` from /me (§3.6). Nothing here
+// infers a permission or a domain from roles, URLs or cached state.
+function pageIdentity(me,domainId){
+  const domains=me?.domains||[];
+  const domain=domains.find(item=>item.id===domainId)||domains.find(item=>item.id===preferredDomain(me))||domains[0]||null;
+  const permissions=new Set(domain?.permissions||[]);
+  return {
+    me,user:me?.user||null,domains,domain,domainId:domain?.id||'',
+    permissions,platformAdmin:!!me?.platform_admin,
+    chatAccess:domains.some(item=>(item.permissions||[]).includes('agent.read')),
+    can:permission=>permissions.has(permission),
+  };
 }
 
 function LoginPage({session,notice,onLogin}){
@@ -44,16 +69,90 @@ function LoginPage({session,notice,onLogin}){
 
 function AccountHome({session,onLogout}){
   const user=session.user;
-  return <main className="auth-account-page"><section className="auth-account-card"><div className="auth-account-avatar"><Check size={26}/></div><span className="auth-eyebrow">SIGNED IN</span><h1>你好，{user.display_name||user.username}</h1><p>你已成功登录 Agent Base。</p><dl><dt>账号</dt><dd>{user.username}</dd><dt>当前角色</dt><dd>{user.roles?.map(role=>role.role_name||role.name).filter(Boolean).join('、')||'待分配'}</dd></dl><div className="auth-notice">当前账号尚未获准访问全局管理工作台。请联系管理员确认所需权限。</div><button className="auth-submit" onClick={onLogout}><LogOut size={17}/>退出登录</button></section></main>;
+  return <main className="auth-account-page"><section className="auth-account-card"><div className="auth-account-avatar"><Check size={26}/></div><span className="auth-eyebrow">SIGNED IN</span><h1>你好，{user.display_name||user.username}</h1><p>你已成功登录 Agent Base。</p><dl><dt>账号</dt><dd>{user.username}</dd><dt>当前角色</dt><dd>{user.roles?.map(role=>role.role_name||role.name).filter(Boolean).join('、')||'待分配'}</dd></dl><div className="auth-notice">当前账号尚未获准访问工作台。请联系管理员确认所需权限。</div><button className="auth-submit" onClick={onLogout}><LogOut size={17}/>退出登录</button></section></main>;
 }
 
 export default function AuthShell({children}){
-  const [session,setSession]=useState(null),[failure,setFailure]=useState(''),[path,setPath]=useState(location.pathname),[notice,setNotice]=useState('');
-  const epoch=useRef(0),current=useRef(session);current.current=session;
+  const [session,setSession]=useState(null),[me,setMe]=useState(null),[domainId,setDomainId]=useState(()=>currentDomain()),[failure,setFailure]=useState(''),[path,setPath]=useState(location.pathname),[notice,setNotice]=useState('');
+  // The hybrid local-bootstrap token is memory-only (§11) and never persisted.
+  const [token,setToken]=useState(''),[needsConnection,setNeedsConnection]=useState(false);
+  const epoch=useRef(0),current=useRef(session),tokenRef=useRef(token);current.current=session;tokenRef.current=token;
+
+  const applyDomain=useCallback(id=>{selectDomain(id);setDomainId(id||'');},[]);
+
+  // The identity is the single source of page permissions (§3.6). A 401 on the
+  // probe is not routed through app:auth-required, so an expired session takes
+  // exactly one redirect path (the session refresh below). In the account-free
+  // local workspace a failed probe re-opens the hybrid bootstrap entry instead.
+  const loadIdentity=useCallback(async version=>{
+    try{
+      const value=await api('v1/me',{token:tokenRef.current});
+      if(version===epoch.current){const id=preferredDomain(value);selectDomain(id);setDomainId(id);setMe(value);setNeedsConnection(false);}
+      return value;
+    }catch(error){
+      if(version!==epoch.current)return null;
+      if(error.status===401){
+        setMe(null);setNeedsConnection(!current.current?.login_required);return null;
+      }
+      if(error.status===403){setMe(null);return null;}
+      throw error;
+    }
+  },[]);
+
+  const refresh=useCallback(async()=>{
+    const version=++epoch.current;
+    const value=await api('auth/session');
+    if(version!==epoch.current)return value;
+    setFailure('');setSession(value);
+    if(!value.authenticated&&value.login_required){
+      // A lost account session clears the cached identity and domain selector
+      // once; the local account-free bootstrap keeps its identity while probing.
+      setMe(null);selectDomain('');setDomainId('');setNeedsConnection(false);
+    }
+    if(value.authenticated||!value.login_required)await loadIdentity(version);
+    return value;
+  },[loadIdentity]);
+
+  // Connecting the hybrid shared token re-reads /me WITH the token. On success
+  // the identity (BOOTSTRAP) supplies the same frozen permission set as /me.
+  const connect=useCallback(async value=>{
+    const trimmed=typeof value==='string'?value.trim():'';
+    tokenRef.current=trimmed;setToken(trimmed);
+    const version=++epoch.current;
+    try{
+      const identity=await api('v1/me',{token:trimmed});
+      if(version!==epoch.current)return identity;
+      const id=preferredDomain(identity);selectDomain(id);setDomainId(id);setMe(identity);setNeedsConnection(false);
+      return identity;
+    }catch(error){
+      if(version!==epoch.current)return null;
+      if(error.status===401){setMe(null);setNeedsConnection(!current.current?.login_required);}
+      throw error;
+    }
+  },[]);
+
   useEffect(()=>{document.title=path==='/login'?'登录 · Agent Base':'Agent Base · 工作空间';},[path]);
-  const refresh=useCallback(async()=>{const version=++epoch.current;const value=await api('auth/session');if(version===epoch.current){setFailure('');setSession(value);}return value;},[]);
-  useEffect(()=>{refresh().catch(()=>setFailure('无法连接服务，请检查服务是否已启动。'));const focus=()=>refresh().catch(()=>{});const changed=event=>{if(event.detail?.status===401&&current.current?.authenticated)setNotice('登录已过期，请重新登录。');refresh().catch(()=>{});};const pop=()=>setPath(location.pathname);addEventListener('focus',focus);addEventListener('app:auth-required',changed);addEventListener('popstate',pop);return()=>{epoch.current++;removeEventListener('focus',focus);removeEventListener('app:auth-required',changed);removeEventListener('popstate',pop)};},[refresh]);
+  useEffect(()=>{
+    refresh().catch(()=>setFailure('无法连接服务，请检查服务是否已启动。'));
+    const focus=()=>refresh().catch(()=>{});
+    const required=event=>{
+      if(event.detail?.status!==401)return;
+      if(current.current?.authenticated)setNotice('登录已过期，请重新登录。');
+      refresh().catch(()=>{});
+    };
+    const invalidDomain=()=>{selectDomain('');setDomainId('');setNotice('当前域不可用，已重新选择可用的域。');refresh().catch(()=>{});};
+    const pop=()=>setPath(location.pathname);
+    addEventListener('focus',focus);addEventListener('app:auth-required',required);
+    addEventListener('app:domain-invalid',invalidDomain);addEventListener('popstate',pop);
+    return()=>{epoch.current++;removeEventListener('focus',focus);removeEventListener('app:auth-required',required);removeEventListener('app:domain-invalid',invalidDomain);removeEventListener('popstate',pop)};
+  },[refresh]);
+
   useEffect(()=>{if(!session?.authenticated)return;const timer=setTimeout(()=>{setNotice('登录已过期，请重新登录。');refresh().catch(()=>{});},Math.max(0,session.expires_at*1000-Date.now())+100);return()=>clearTimeout(timer);},[session?.expires_at,session?.authenticated,refresh]);
+
+  const identity=me?pageIdentity(me,domainId):null;
+  const canManage=!!session?.can_manage_workspace||!!identity?.platformAdmin;
+  const chatAccess=!!identity?.chatAccess;
+
   useEffect(()=>{
     if(!session)return;
     if(!session.authenticated&&session.login_required&&path!=='/login'){
@@ -61,16 +160,32 @@ export default function AuthShell({children}){
     }else if(session.authenticated&&path==='/login'){
       let next=returnPath(new URLSearchParams(location.search).get('next'));
       if(new URL(next,location.origin).pathname==='/workbench'){
-        if(session.can_manage_workspace){location.replace(next);return;}
+        if(canManage){location.replace(next);return;}
         next='/dashboard';
       }
       history.replaceState(null,'',next);setPath(location.pathname);dispatchEvent(new PopStateEvent('popstate'));
     }
-  },[session,path]);
-  const logout=async()=>{try{await api('auth/logout',{method:'POST'});setNotice('你已退出登录。');await refresh();history.replaceState(null,'','/login');setPath('/login');}catch{setFailure('退出未完成，请重试。');}};
+  },[session,path,canManage]);
+
+  // Chat is the only surface C6 wires to the user system. Users who can only
+  // chat stay there instead of hitting 403 responses on global admin pages.
+  useEffect(()=>{
+    if(!session?.authenticated||!identity||path==='/login')return;
+    if(chatAccess&&!canManage&&path!=='/chat'){history.replaceState(null,'','/chat');setPath('/chat');dispatchEvent(new PopStateEvent('popstate'));}
+  },[session?.authenticated,identity,path,chatAccess,canManage]);
+
+  const logout=async()=>{try{await api('auth/logout',{method:'POST'});selectDomain('');setDomainId('');setToken('');tokenRef.current='';setMe(null);setNeedsConnection(false);setNotice('你已退出登录。');await refresh();history.replaceState(null,'','/login');setPath('/login');}catch{setFailure('退出未完成，请重试。');}};
+
   if(failure)return <main className="auth-account-page"><section className="auth-account-card"><h1>连接暂时不可用</h1><p role="alert">{failure}</p><button className="auth-submit" onClick={()=>refresh().catch(()=>{})}>重新连接</button></section></main>;
   if(!session)return <main className="auth-account-page"><div className="auth-loading" role="status"><LoaderCircle size={23} className="spin"/>正在连接工作空间…</div></main>;
   if(!session.authenticated&&(path==='/login'||session.login_required))return <LoginPage session={session} notice={notice} onLogin={refresh}/>;
-  if(session.authenticated&&!session.can_manage_workspace)return <AccountHome session={session} onLogout={logout}/>;
-  return children({session,onLogout:logout});
+  if(!identity&&!needsConnection)return <main className="auth-account-page"><div className="auth-loading" role="status"><LoaderCircle size={23} className="spin"/>正在确认权限…</div></main>;
+  if(!identity){
+    // Local hybrid bootstrap without a token: render the shell so the token
+    // entry is reachable. It carries no permissions until /me accepts it.
+    const pending={me:null,user:null,domains:[],domain:null,domainId:'',permissions:new Set(),platformAdmin:false,chatAccess:false,can:()=>false,canManage:false,setDomain:applyDomain,refresh:()=>refresh().catch(()=>{})};
+    return children({session,onLogout:logout,notice,clearNotice:()=>setNotice(''),token,connect,autoConnect:true,identity:pending});
+  }
+  if(!canManage&&!chatAccess)return <AccountHome session={session} onLogout={logout}/>;
+  return children({session,onLogout:logout,notice,clearNotice:()=>setNotice(''),token,connect,autoConnect:false,identity:{...identity,canManage,setDomain:applyDomain,refresh:()=>refresh().catch(()=>{})}});
 }

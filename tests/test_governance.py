@@ -343,3 +343,43 @@ def test_http_domain_scoped_permission_header(config, monkeypatch):
         assert client.get("/api/v1/users", headers=da_h).status_code == 403
         # 携带 x-domain-id 命中域内授权 → 200
         assert client.get("/api/v1/users", headers={**da_h, "x-domain-id": domain["id"]}).status_code == 200
+
+
+def test_refresh_and_per_request_account_revalidation(config, monkeypatch):
+    import time
+    from agent_base.web import create_app
+    monkeypatch.setenv('AGENT_BASE_ADMIN_PASSWORD', 'fixture-password')
+    monkeypatch.setenv('AGENT_BASE_WEB_AUTH', 'jwt')
+    app = create_app(config, background=False)
+    gov = app.state.governance
+    with TestClient(app) as client:
+        old = gov.login('admin', 'fixture-password')
+        header = {'Authorization': 'Bearer ' + old['token']}
+        renewed = client.post('/api/v1/auth/refresh', headers=header)
+        assert renewed.status_code == 200
+        assert renewed.json()['expires_in'] == 1200
+        new = gov.decode(renewed.json()['token'])
+        assert new['jti'] != gov.decode(old['token'])['jti']
+        assert new['iat'] <= time.time() < new['exp']
+        for token in (old['token'], renewed.json()['token']):
+            assert client.get('/api/v1/me', headers={'Authorization': 'Bearer ' + token}).status_code == 200
+        expired = auth.issue_token({'sub': old['user']['id']}, gov._secret, ttl=-1)
+        for path in ('/api/v1/auth/refresh', '/api/v1/me'):
+            request = client.post if path.endswith('refresh') else client.get
+            for token, code in ((None, 'token_missing'), ('invalid', 'token_invalid'), (expired, 'token_expired')):
+                response = request(path, headers={'Authorization': 'Bearer ' + token} if token else {})
+                assert response.status_code == 401 and response.json()['code'] == code
+        for status in ('locked', 'disabled'):
+            gov.store.update_user(old['user']['id'], status=status)
+            for path in ('/api/v1/me', '/api/v1/users'):
+                assert client.get(path, headers=header).json()['code'] == 'user_disabled'
+            assert client.post('/api/v1/auth/refresh', headers=header).status_code == 401
+        gov.store.update_user(old['user']['id'], status='active')
+        client.post('/api/auth/login', json={'username': 'admin', 'password': 'fixture-password'})
+        assert client.post('/api/v1/auth/refresh').json()['code'] == 'token_missing'
+
+
+@pytest.mark.parametrize('token', ['☃.sig', 'body.☃', '.', 'invalid', ''])
+def test_malformed_tokens_are_value_errors(token):
+    with pytest.raises(ValueError):
+        auth.decode_token(token, 'fixture-secret')
