@@ -124,3 +124,15 @@ def test_cancel_during_process_creation_is_deferred(checkout, monkeypatch):
     report=json.loads(next((checkout/'.ci-reports').glob('*/report.json')).read_text())
     assert report['status']=='cancelled'
     assert report['stages'][0]['exit_code'] is not None
+
+
+def test_stage_cleans_detached_descendant(tmp_path):
+    import psutil
+    probe=tmp_path/'probe.py'
+    pidfile=tmp_path/'pid'
+    probe.write_text("import subprocess,sys,time\nfrom pathlib import Path\np=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],start_new_session=True)\nPath(sys.argv[1]).write_text(str(p.pid))\ntime.sleep(.5)\n")
+    helper=Path(__file__).resolve().parents[1]/'scripts/ci_stage.py'
+    subprocess.run([sys.executable,str(helper),str(tmp_path/'processes.json'),sys.executable,str(probe),str(pidfile)],check=True,timeout=12)
+    pid=int(pidfile.read_text())
+    assert not psutil.pid_exists(pid) or psutil.Process(pid).status()==psutil.STATUS_ZOMBIE
+    assert json.loads((tmp_path/'processes.json').read_text())['tracked_children']==1

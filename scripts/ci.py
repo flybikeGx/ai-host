@@ -41,6 +41,9 @@ def main():
         nonlocal child, spawning
         stage = dict(name=name, command=command, exit_code=None)
         result['stages'].append(stage)
+        if args.mode != 'bootstrap':
+            command = [str(ROOT/'.venv/bin/python'), str(ROOT/'scripts/ci_stage.py'),
+                       str(report/(name+'-processes.json')), *command]
         with (report / (name + '.log')).open('w') as log:
             spawning = True
             try:

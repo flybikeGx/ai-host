@@ -11,7 +11,7 @@ python3 scripts/ci.py contracts
 
 bootstrap 使用 uv.lock / package-lock.json 冻结安装及项目 `.ci-browsers` Chromium；需要网络下载 Python/包/浏览器。依赖与浏览器就绪后的检查可离线运行，测试只用本机 fake CLI，无真实账号或付费模型。quick 是全部 pytest 与前端构建；full 再运行真实后端、SQLite 迁移/重启、浏览器、SSE/产物和模拟认证重启检查。contracts 独立执行未实现契约，失败照常非零，不作为已实现行为通过的依据。不实现 C3–C7。
 
-每次检查生成唯一 `.ci-reports/<时间-随机标识>/report.json`：commit、dirty、系统/架构、工具版本、阶段命令与退出码。各阶段日志、Playwright JSON、HTML、失败 trace/截图保存在同目录。退出码：0通过、1检查失败、2环境缺失、124超时、130取消。用 `--timeout 60` 控制整个检查的阶段预算。日志只继承白名单环境，不继承 API key/token；仅包含合成账号，分享前仍应检查机器路径及测试输出。报告目录不会自动删除；成员确认不再需要后自行删除旧目录。中断时杀死本阶段独立进程组，不按进程名称清理；端口动态分配、数据在临时目录内，不访问业务库。不同checkout的依赖、浏览器及报告分离；同checkout并行构建不支持，应使用独立checkout。
+每次检查生成唯一 `.ci-reports/<时间-随机标识>/report.json`：commit、dirty、系统/架构、工具版本、阶段命令与退出码。各阶段日志、Playwright JSON、HTML、失败 trace/截图保存在同目录。退出码：0通过、1检查失败、2环境缺失、124超时、130取消。用 `--timeout 60` 控制整个检查的阶段预算。日志只继承白名单环境，不继承 API key/token；仅包含合成账号，分享前仍应检查机器路径及测试输出。报告目录不会自动删除；成员确认不再需要后自行删除旧目录。每阶段监督器用psutil记录子进程及创建时间，跟踪独立session中的后代；正常结束、取消、超时均清理已记录后代，再清理本阶段独立进程组，不按进程名称清理；端口动态分配、数据在临时目录内，不访问业务库。不同checkout的依赖、浏览器及报告分离；同checkout并行构建不支持，应使用独立checkout。
 
 ## 主动安装本机门禁
 
@@ -27,4 +27,4 @@ python3 scripts/ci_hooks.py uninstall
 
 在新目录 `git clone <本项目仓库地址>`，进入目录执行bootstrap和full，保存生成报告。Intel或另一台Mac需独立重复此步骤并记录系统和架构。下载失败先核实网络/代理与工具版本，重新bootstrap；浏览器缺失重新bootstrap，不回退到系统Chrome。测试失败阅读对应阶段日志和HTML，保留报告，不用skip或放宽断言。超时/取消查看report状态；重复full应产生新报告且不依赖上次数据库。
 
-隔离副本中可引入 `tests/test_ci_failure_probe.py`，内容 `def test_probe(): assert False`，运行full应返回1；删除后重跑。缺依赖可在隔离副本重命名`.venv`，应返回2；超时用`full --timeout 0.01`应返回124；运行中Ctrl-C返回130。并行验证在两个独立clone中同时运行full。演示hook失败时，仅在临时副本安装hook并保留故意失败测试，`git commit`应被阻止，卸载后确认配置移除。不得将实验hook安装到成员既有工作区。
+隔离副本中可引入 `tests/test_ci_failure_probe.py`，内容 `def test_probe(): assert False`，运行full应返回1；删除后重跑。故障演示可在隔离副本的 pytest 配置中临时加 `addopts = "-x"` 并将探针命名为 `test_000_ci_probe.py`，加快故意失败反馈，随后恢复配置。缺依赖可在隔离副本重命名`.venv`，应返回2；超时用`full --timeout 0.01`应返回124；运行中Ctrl-C返回130。并行验证在两个独立clone中同时运行full。演示hook失败时，仅在临时副本安装hook并保留故意失败测试，`git commit`应被阻止，卸载后确认配置移除。不得将实验hook安装到成员既有工作区。
