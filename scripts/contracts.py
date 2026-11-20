@@ -174,8 +174,12 @@ def evaluate(registry, *, pytest_ids, e2e_titles, ui_titles, runner_text,
 
 def _capture(command, cwd):
     environment = {key: value for key, value in os.environ.items()
-                   if key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT", "LANG", "PLAYWRIGHT_BROWSERS_PATH")}
+                   if key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT", "LANG",
+                              "PLAYWRIGHT_BROWSERS_PATH", "CI_REPORT")}
     environment.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(ROOT / ".ci-browsers"))
+    # The real-E2E Playwright config derives outputDir from CI_REPORT; without
+    # it `--list` would create a stray `frontend/undefined/` directory.
+    environment.setdefault("CI_REPORT", str(report_dir))
     process = subprocess.run(command, cwd=cwd, env=environment, capture_output=True, text=True)
     if process.returncode:
         raise SystemExit(f"{' '.join(command)} failed:\n{process.stdout}{process.stderr}")
