@@ -120,6 +120,13 @@ class Config:
     max_concurrent: int = 2
     guardian: dict = field(default_factory=dict)
     oss: dict = field(default_factory=dict)
+    web: dict = field(default_factory=dict)
+
+    def web_auth_mode(self) -> str:
+        mode = os.environ.get("AGENT_BASE_WEB_AUTH", self.web.get("auth", "hybrid"))
+        if not isinstance(mode, str) or mode not in {"hybrid", "jwt"}:
+            raise ValueError("web.auth 必须是 hybrid / jwt")
+        return mode
 
     @classmethod
     def load(cls, filename: str | Path | None = None) -> "Config":
@@ -148,7 +155,12 @@ class Config:
             raise ValueError("timeout_seconds 必须在 1–86400 之间")
         guardian = _parse_guardian(raw.get("guardian", {}))
         oss = _parse_oss(raw.get("oss", {}))
-        return cls(path, data, runtime, cap, guardian, oss=oss)
+        web = raw.get("web", {})
+        if not isinstance(web, dict):
+            raise ValueError("web 必须是表")
+        result = cls(path, data, runtime, cap, guardian, oss=oss, web=web)
+        result.web_auth_mode()
+        return result
 
 
 def _parse_guardian(raw) -> dict:

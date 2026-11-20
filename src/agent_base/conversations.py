@@ -27,24 +27,69 @@ class ConversationBusy(ValueError):
     pass
 
 
+class ChatError(Exception):
+    """Page-surface error carrying the frozen §6.2 stable code."""
+
+    status = 400
+    code = "invalid_request"
+
+    def __init__(self, detail: str, *, code: str | None = None):
+        super().__init__(detail)
+        self.detail = detail
+        if code is not None:
+            self.code = code
+
+
+class ChatNotFound(ChatError):
+    """404 must never reveal whether the object exists (§6.2)."""
+
+    status = 404
+    code = "conversation_not_found"
+
+
+class ChatForbidden(ChatError):
+    status = 403
+
+
+class ChatInvalid(ChatError):
+    status = 400
+
+
 class Conversations:
     def __init__(self, config):
         self.config = config
         self.store = Store(config.data)
         self.repositories = Repositories(config)
 
-    def targets(self):
-        result = [{"id": "admin", "name": "Admin Agent", "kind": "admin", "available": self.config.runtime.get("engine", "dsh") == "dsh",
-                   "description": "安装、管理和调度所有仓库 Agent", "skills": [], "mcp": ["admin"]}]
+    def targets(self, identity=None, *, default_domain_id=None):
+        """Visible Agent catalog. ``identity=None`` is the trusted local caller path.
+
+        HTTP always passes an identity: D6 keeps the Admin Agent to platform
+        administrators, §7.4 filters repo Agents to the current domain and
+        §8.2 treats a NULL installation domain as the default domain.
+        """
+        result = []
+        if identity is None or identity.platform_admin or identity.is_bootstrap:
+            result.append({"id": "admin", "name": "Admin Agent", "kind": "admin", "available": self.config.runtime.get("engine", "dsh") == "dsh",
+                           "description": "安装、管理和调度所有仓库 Agent", "skills": [], "mcp": ["admin"]})
         for item in self.repositories.list():
             if item["status"] != "ready":
                 continue
+            if identity is not None:
+                if identity.user_type == "service" or not identity.can("agent.read"):
+                    continue
+                if self._target_domain(item, default_domain_id) != identity.current_domain:
+                    continue
             manifest = item["manifest"]
             result.append({"id": item["id"], "name": manifest.get("package", {}).get("name", item["repo_id"]), "kind": "repo",
                 "description": manifest.get("task", {}).get("default", "已安装仓库 Agent"), "namespace": item["namespace"],
                 "available": bool(item["enabled"]), "service_alive": item["service_alive"], "commit": item["commit_sha"],
                 "skills": [s["name"] for s in manifest.get("skills", [])], "mcp": [s["id"] for s in manifest.get("mcp", {}).get("servers", [])]})
         return {"targets": result, "defaults": {"model": self.config.runtime["model"], "effort": self.config.runtime.get("effort", "high")}}
+
+    @staticmethod
+    def _target_domain(item, default_domain_id):
+        return item.get("domain_id") or default_domain_id
 
     def create(self, target="admin", *, title=None, model=None, effort=None):
         if self.config.runtime.get("engine", "dsh") != "dsh":
@@ -90,10 +135,58 @@ class Conversations:
     def public_turn(turn):
         return {key: turn.get(key) for key in ("id", "conversation_id", "user_text", "assistant_text", "status", "created", "updated", "error", "run_id")}
 
-    def list(self, *, archived=False):
+    def owned(self, chat_id, identity, *, scope_all=False):
+        """The single ownership gate for every by-id read (§5.3, frozen).
+
+        Missing, NULL-owned for non-bootstrap, other people's, and
+        out-of-domain conversations all raise the same 404 (§6.2).
+        ``scope_all`` is the explicit, read-only platform-admin bypass; callers
+        audit it and must never pass it on write routes.
+        """
+        try:
+            row = self.get(chat_id)
+        except ValueError:
+            raise ChatNotFound("对话不存在")
+        if row.get("owner_user_id") is None and not identity.is_bootstrap:
+            raise ChatNotFound("对话不存在")
+        if scope_all:
+            if not identity.platform_admin and not identity.is_bootstrap:
+                raise ChatForbidden("只有平台管理员可以使用只读范围", code="scope_denied")
+            return row
+        if identity.is_bootstrap:
+            return row
+        if row.get("owner_user_id") != identity.user_id:
+            raise ChatNotFound("对话不存在")
+        if row.get("domain_id") not in identity.domains and row.get("domain_id") is not None:
+            raise ChatNotFound("对话不存在")
+        return row
+
+    def list(self, *, archived=False, identity=None, domain_id=None, scope_all=False,
+             default_domain_id=None):
+        """Owner- and domain-scoped conversation list (§5.1/§4).
+
+        ``identity=None`` is the trusted local caller path. The ownership
+        condition exists in exactly one place here; bootstrap keeps its
+        account-free semantics and never filters by owner (§3.3).
+        """
         self.reconcile()
+        clause, values = ["archived=?"], [int(archived)]
+        if identity is not None:
+            if not scope_all and not identity.is_bootstrap:
+                clause.append("owner_user_id=?")
+                values.append(identity.user_id)
+            domains = sorted(identity.domains)
+            if domain_id is not None:
+                clause.append("COALESCE(domain_id, ?)=?")
+                values.extend([default_domain_id, domain_id])
+            elif domains:
+                clause.append("COALESCE(domain_id, ?) IN (" + ",".join("?" for _ in domains) + ")")
+                values.extend([default_domain_id, *domains])
+            else:
+                return []
+        sql = "SELECT id FROM conversations WHERE " + " AND ".join(clause) + " ORDER BY updated DESC LIMIT 200"
         with self.store.connection() as conn:
-            ids = [r[0] for r in conn.execute("SELECT id FROM conversations WHERE archived=? ORDER BY updated DESC LIMIT 200", (int(archived),))]
+            ids = [r[0] for r in conn.execute(sql, values)]
         result = []
         for chat_id in ids:
             item = self.get(chat_id)
@@ -104,9 +197,10 @@ class Conversations:
             result.append(item)
         return result
 
-    def snapshot(self, chat_id):
+    def snapshot(self, chat_id, identity=None, *, scope_all=False):
         self.reconcile()
-        self.get(chat_id)
+        if identity is not None:
+            self.owned(chat_id, identity, scope_all=scope_all)
         with self.store.connection() as conn:
             conn.execute("BEGIN")
             chat = dict(conn.execute("SELECT * FROM conversations WHERE id=?", (chat_id,)).fetchone())
@@ -114,11 +208,16 @@ class Conversations:
             events = [dict(r) for r in conn.execute("SELECT * FROM conversation_events WHERE conversation_id=? ORDER BY seq DESC LIMIT 5000", (chat_id,))][::-1]
             cursor = conn.execute("SELECT coalesce(max(seq),0) FROM conversation_events WHERE conversation_id=?", (chat_id,)).fetchone()[0]
         chat["spec"] = json.loads(chat["spec"])
+        include_files = identity is None or identity.can("file.read")  # §5.1: task.read alone must not expose artifacts
         return {"conversation": chat, "turns": [self.public_turn(t) for t in turns],
-                "events": [{**e, "data": json.loads(e["data"])} for e in events], "cursor": cursor, "files": self.files(chat_id)}
+                "events": [{**e, "data": json.loads(e["data"])} for e in events], "cursor": cursor,
+                "files": self.files(chat_id, identity, scope_all=scope_all) if include_files else []}
 
-    def files(self, chat_id):
-        self.get(chat_id)
+    def files(self, chat_id, identity=None, *, scope_all=False):
+        if identity is not None:
+            self.owned(chat_id, identity, scope_all=scope_all)
+        else:
+            self.get(chat_id)
         workspace = self.config.data / "conversations" / chat_id / "workspace"
         directory = workspace / "artifacts"
         if not directory.is_dir():
@@ -136,14 +235,24 @@ class Conversations:
                     break
         return result
 
-    def artifact(self, chat_id, relative):
-        self.get(chat_id)
+    def artifact(self, chat_id, relative, identity=None, *, scope_all=False):
+        if identity is not None:
+            self.owned(chat_id, identity, scope_all=scope_all)
+        else:
+            self.get(chat_id)
         if not isinstance(relative, str) or not relative.startswith("artifacts/"):
             raise ValueError("只允许下载本会话 artifacts 中的文件")
         workspace = self.config.data / "conversations" / chat_id / "workspace"
-        file = within(workspace, relative)
-        if not file.is_file() or file.stat().st_size > 64 * 1024 * 1024:
-            raise ValueError("文件不存在或超过 64 MiB")
+        try:
+            file = within(workspace, relative)
+        except ValueError as error:
+            if str(error).startswith("文件不存在"):
+                raise ChatNotFound("文件不存在", code="artifact_not_found")
+            raise
+        if not file.is_file():
+            raise ChatNotFound("文件不存在", code="artifact_not_found")
+        if file.stat().st_size > 64 * 1024 * 1024:
+            raise ChatInvalid("文件超过 64 MiB")
         return file
 
     def rename(self, chat_id, title=None, archived=None):
@@ -217,8 +326,11 @@ class Conversations:
             if kind == "text.delta":
                 conn.execute("UPDATE conversation_turns SET assistant_text=assistant_text || ?,updated=? WHERE id=? AND status='running'", (data["text"], time.time(), turn_id))
 
-    def events(self, chat_id, after=0):
-        self.get(chat_id)
+    def events(self, chat_id, after=0, identity=None, *, scope_all=False):
+        if identity is not None:
+            self.owned(chat_id, identity, scope_all=scope_all)
+        else:
+            self.get(chat_id)
         with self.store.connection() as conn:
             rows = conn.execute("SELECT * FROM conversation_events WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT 200", (chat_id, after)).fetchall()
         return [{**dict(row), "data": json.loads(row["data"])} for row in rows]
