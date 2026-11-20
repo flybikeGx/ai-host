@@ -2,13 +2,14 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {ArrowDown, ArrowUp, Archive, BookOpen, Bot, Check, ChevronDown, ChevronRight, Circle, Clock3, Copy, Gauge, ExternalLink, KeyRound, LayoutDashboard, LoaderCircle, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, RefreshCw, Send, Server, ShieldCheck, SlidersHorizontal, Square, Terminal, User, X} from 'lucide-react';
+import {ArrowDown, ArrowUp, Archive, BookOpen, Bot, Check, ChevronDown, ChevronRight, Circle, Clock3, Copy, Gauge, ExternalLink, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, RefreshCw, Send, Server, ShieldCheck, SlidersHorizontal, Square, Terminal, User, X} from 'lucide-react';
 import './style.css';
 import './cron.css';
 import CronPage from './CronPage';
 import DashboardPage from './DashboardPage';
 import KnowledgePage from './KnowledgePage';
 import ServicesPage from './ServicesPage';
+import AuthShell from './AuthShell';
 import {api} from './api';
 
 const routeView=()=>location.pathname==='/chat'?'chat':location.pathname==='/cron'?'cron':location.pathname==='/knowledge'?'knowledge':location.pathname==='/services'?'services':'dashboard';
@@ -46,7 +47,7 @@ function ToolTrace({events,turn}){
     return <details className="tool" key={call.call_id||i}><summary><span className={'tool-dot '+(failed?'failed':call.status?'done':'')} /><code>{call.tool.replace(/^mcp__repo_[a-f0-9]+__/,'').replace(/^mcp__admin__/,'admin · ')}</code><span className={'tool-label '+(failed?'failed':'')}>{label}</span><ChevronRight size={13}/></summary><div className="tool-body"><span>参数</span><pre>{call.input||'{}'}</pre>{call.result!==undefined&&<><span>返回</span><pre>{call.result}</pre></>}</div></details>})}</div></details>;
 }
 
-function App(){
+function App({session,onLogout}){
   const [targets,setTargets]=useState([]),[defaults,setDefaults]=useState({model:'',effort:'high'}),[chats,setChats]=useState([]);
   const [selected,setSelected]=useState(()=>location.pathname==='/chat'?location.hash.slice(1)||null:null),[targetId,setTargetId]=useState(null);
   const [view,setView]=useState(routeView),[agentFilter,setAgentFilter]=useState('all'),[connectionRevision,setConnectionRevision]=useState(0);
@@ -64,7 +65,7 @@ function App(){
   const title=snapshot?.conversation.title||(targetId?'新的对话':'选择 Agent');
 
   useEffect(()=>{if(location.pathname==='/knowledge'&&location.hash.startsWith('#connect=')){const ticket=location.hash.slice(9);history.replaceState(null,'','/knowledge');api('knowledge/connect',{method:'POST',body:{ticket}}).then(()=>setConnectionRevision(n=>n+1)).catch(e=>setError(e.message));}},[]);
-  const reportError=useCallback(e=>{if(e.name==='AbortError')return;if(e.status===401)setShowToken(true);setError(e.message||'连接失败，请重试');},[]);
+  const reportError=useCallback(e=>{if(e.name==='AbortError')return;if(e.status===401){dispatchEvent(new CustomEvent('app:auth-required',{detail:{status:401}}));if(!session?.authenticated)setShowToken(true);}setError(e.message||'连接失败，请重试');},[session?.authenticated]);
   const reload=useCallback(async()=>{
     const [catalog,list]=await Promise.all([api('chat/targets',{token}),api('conversations?archived='+archived,{token})]);
     setTargets(catalog.targets);setDefaults(catalog.defaults);setChats(list);setModel(old=>old||catalog.defaults.model);
@@ -149,7 +150,7 @@ function App(){
       <input className="search" aria-label="搜索对话" placeholder="搜索对话…" value={search} onChange={e=>setSearch(e.target.value)}/>
       <select className="history-filter" aria-label="按 Agent 筛选对话" value={agentFilter} onChange={e=>setAgentFilter(e.target.value)}><option value="all">所有 Agent</option>{historyTargets.map(id=><option key={id} value={id}>{agentName(id)}</option>)}</select>
       <nav className="history-list" aria-label="对话历史">{filtered.map(chat=><button key={chat.id} className={'history-item '+(selected===chat.id?'selected':'')} onClick={()=>choose(chat.id,chat.target)}><MessageSquare size={14}/><span>{chat.title}<small>{agentName(chat.target)}</small></span>{busy(chat.status)&&<span className="presence busy"/>}</button>)}{!filtered.length&&<p className="empty-history">{search?'没有找到相关对话':'你的对话会保存在这里'}</p>}</nav>
-      <div className="sidebar-footer"><a href="/workbench"><LayoutDashboard size={15}/><span>工作台与 Repo 资源</span><ExternalLink size={12}/></a><button onClick={()=>setShowToken(true)}><KeyRound size={15}/><span>连接设置</span><span className="local-badge">LOCAL</span></button></div>
+      <div className="sidebar-footer">{session?.authenticated?<div className="session-account"><User size={14}/><span>{session.user.display_name||session.user.username}</span><button aria-label="退出登录" title="退出登录" onClick={onLogout}><LogOut size={14}/></button></div>:<div className="session-account"><User size={14}/><a href={'/login?next='+encodeURIComponent(location.pathname+location.hash)}>账号登录</a></div>}<a href="/workbench"><LayoutDashboard size={15}/><span>工作台与 Repo 资源</span><ExternalLink size={12}/></a><button onClick={()=>setShowToken(true)}><KeyRound size={15}/><span>连接设置</span><span className="local-badge">LOCAL</span></button></div>
     </aside>
     {view==='services'?<ServicesPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:view==='knowledge'?<KnowledgePage token={token} connectionRevision={connectionRevision} onOpenNav={()=>setMobileNav(true)}/>:view==='dashboard'?<DashboardPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)} onOpenChat={id=>choose(id)} onOpenSchedules={()=>navigate('cron')}/>:view==='cron'?<CronPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:<main className="main-panel">
       <header className="topbar"><button className="icon-button mobile-only" aria-label="打开侧栏" onClick={()=>setMobileNav(true)}><Menu size={20}/></button><div className="conversation-heading"><div className="breadcrumb">{target.name}<ChevronRight size={12}/><span>对话</span></div><div className="title-row">{editing?<input className="title-input" value={titleDraft} autoFocus onChange={e=>setTitleDraft(e.target.value)} onBlur={rename} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();if(e.key==='Escape')setEditing(false)}}/>:<h1>{title}</h1>}{selected&&!editing&&<button className="icon-button" aria-label="重命名对话" onClick={()=>{setTitleDraft(title);setEditing(true)}}><Pencil size={13}/></button>}</div></div><div className="topbar-actions">{selected&&<span className={'connection '+(connected?'connected':'')}><span/>{connected?'已连接':'正在重连'}</span>}<button className={'icon-button '+(showSettings?'active':'')} aria-label="对话信息" onClick={()=>setShowSettings(!showSettings)}><SlidersHorizontal size={17}/></button>{selected&&<button className="icon-button" aria-label={isArchived?'恢复对话':'归档对话'} onClick={archive} disabled={!!activeTurn}><Archive size={17}/></button>}</div></header>
@@ -166,4 +167,4 @@ function App(){
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<AuthShell>{props=><App {...props}/>}</AuthShell>);

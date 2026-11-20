@@ -12,6 +12,8 @@ Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、�
 
 网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[共享服务](docs/ManagedServices.md)、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
 
+账号登录入口：<http://127.0.0.1:8765/login>，使用已有平台账号，无注册入口；刷新与页面导航保留浏览器会话。管理员可用 `agent-base control init` 首次初始化账号。登录、全局工作台权限和企业 SSO 的实际边界见 [网页登录说明](docs/WebChat.md#账号登录与会话)。
+
 知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](docs/Knowledge.md)。
 
 Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
