@@ -172,7 +172,7 @@ def evaluate(registry, *, pytest_ids, e2e_titles, ui_titles, runner_text,
             "totals": {"pytest": len(pytest_ids), "e2e": len(e2e_titles), "ui": len(ui_titles)}}, not faults
 
 
-def _capture(command, cwd):
+def _capture(command, cwd, report_dir):
     environment = {key: value for key, value in os.environ.items()
                    if key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT", "LANG",
                               "PLAYWRIGHT_BROWSERS_PATH", "CI_REPORT")}
@@ -194,10 +194,10 @@ def main():
     if missing_binaries:
         print("Run python3 scripts/ci.py bootstrap first", flush=True)
         return 2
-    pytest_out = _capture([str(ROOT / ".venv/bin/python"), "-m", "pytest", "--collect-only", "-q"], ROOT)
+    pytest_out = _capture([str(ROOT / ".venv/bin/python"), "-m", "pytest", "--collect-only", "-q"], ROOT, report_dir)
     e2e_out = _capture(["npx", "--no-install", "playwright", "test",
-                        "--config", "playwright.real.config.js", "--list"], ROOT / "frontend")
-    ui_out = _capture(["npx", "--no-install", "playwright", "test", "--list"], ROOT / "frontend")
+                        "--config", "playwright.real.config.js", "--list"], ROOT / "frontend", report_dir)
+    ui_out = _capture(["npx", "--no-install", "playwright", "test", "--list"], ROOT / "frontend", report_dir)
     report, ok = evaluate(
         CONTRACTS,
         pytest_ids=parse_pytest_collection(pytest_out),
