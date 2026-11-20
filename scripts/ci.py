@@ -26,18 +26,30 @@ def main():
     env.update(CI_REPORT=str(report), PLAYWRIGHT_BROWSERS_PATH=str(ROOT / '.ci-browsers'), PYTHONPATH=str(ROOT / 'src'))
     result = dict(mode=args.mode, system=platform.platform(), architecture=platform.machine(), stages=[], tools={})
     child = None
+    spawning = False
+    pending_signal = None
     deadline = time.monotonic() + args.timeout
 
     def interrupted(signum, frame):
+        nonlocal pending_signal
+        if spawning:
+            pending_signal = signum
+            return
         raise InterruptedError(str(signum))
 
     def run(name, command, cwd=ROOT):
-        nonlocal child
+        nonlocal child, spawning
         stage = dict(name=name, command=command, exit_code=None)
         result['stages'].append(stage)
         with (report / (name + '.log')).open('w') as log:
-            child = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=log, start_new_session=True)
+            spawning = True
             try:
+                child = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=log, start_new_session=True)
+            finally:
+                spawning = False
+            try:
+                if pending_signal is not None:
+                    raise InterruptedError(str(pending_signal))
                 code = child.wait(timeout=max(.001, deadline-time.monotonic()))
                 stage['exit_code'] = code
             finally:

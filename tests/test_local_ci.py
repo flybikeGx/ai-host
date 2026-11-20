@@ -94,3 +94,33 @@ def test_hooks_block_commit_and_uninstall(checkout):
     assert push.returncode==1
     subprocess.run([sys.executable,str(checkout/'scripts/ci_hooks.py'),'uninstall'],check=True)
     assert git('config','--worktree','--get','core.hooksPath').returncode==1
+
+
+def test_cancel_during_process_creation_is_deferred(checkout, monkeypatch):
+    import importlib.util
+    import os
+    import signal
+    spec=importlib.util.spec_from_file_location('local_ci',checkout/'scripts/ci.py')
+    ci=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ci)
+    (checkout/'frontend/node_modules').mkdir(parents=True)
+    binary=checkout/'.venv/bin/python'
+    binary.parent.mkdir(parents=True)
+    binary.write_text('#!/bin/sh\nsleep 30\n')
+    binary.chmod(0o755)
+    original=ci.subprocess.Popen
+    def interrupted_spawn(command,*args,**kwargs):
+        if command[0]==str(binary):
+            os.kill(os.getpid(),signal.SIGINT)
+        return original(command,*args,**kwargs)
+    monkeypatch.setattr(ci.subprocess,'Popen',interrupted_spawn)
+    monkeypatch.setattr(sys,'argv',['ci.py','quick'])
+    previous={sig:signal.getsignal(sig) for sig in (signal.SIGINT,signal.SIGTERM)}
+    try:
+        assert ci.main()==130
+    finally:
+        for sig,handler in previous.items():
+            signal.signal(sig,handler)
+    report=json.loads(next((checkout/'.ci-reports').glob('*/report.json')).read_text())
+    assert report['status']=='cancelled'
+    assert report['stages'][0]['exit_code'] is not None
