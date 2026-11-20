@@ -96,7 +96,21 @@ repo skills 不重新安装，MCP 不随每轮启动或退出；对话超时、�
 
 同一 client_key 重试返回原轮次；同 key 不同文本报错。新 key 遇到当前对话仍忙返回 409，前端等待结束或停止后再发。重新订阅 SSE 只读已有事件，不产生模型请求。浏览器使用 fetch 读取 SSE，因此管理 Token 可以放在 Authorization header，不进入 URL。
 
-消息与 API 使用原有 Bearer 认证、Host 和跨 Origin 写请求限制。若配置 AGENT_BASE_WEB_TOKEN，在对话台“连接设置”填写；Token 只保存在当前页面内存，不写入 localStorage。当前仍是本机可信用户管理界面，没有增加多用户账号系统。
+消息与 API 保留 Host、跨 Origin 写请求限制和原管理 Bearer 认证；账号登录后也可以使用同源浏览器会话，无需反复填写 Token。原“连接设置”继续支持已配置的 `AGENT_BASE_WEB_TOKEN`，只保存在页面内存。
+
+## 账号登录与会话
+
+访问 `/login`，使用管理员已经分配的账号和密码登录；页面没有注册入口。登录成功后回到原来的页面，刷新、导航、SSE 和下载沿用同一个会话；侧栏显示当前用户并提供退出。账号未获全局管理权限时只展示本人账号信息，不挂载全局工作台。
+
+尚无账号时，由管理员在本机运行 `agent-base control init` 初始化管理员；此命令仅首次创建时在管理员自己的终端输出初始密码，登录页不提供默认密码或自动创建管理员。也可通过已有 `AGENT_BASE_ADMIN_PASSWORD` 启动引导。其他账号仍由有权管理员通过治理接口创建。
+
+浏览器 Cookie 为 HttpOnly、SameSite=Lax，HTTPS 下带 Secure；会话随机值只以哈希存入 `control.sqlite.browser_sessions`。会话有效期为 20 分钟，无静默刷新；到期返回登录页。退出会删除服务端会话，复制的旧 Cookie 也不可继续使用；不把密码、平台令牌或管理 Token 写入 localStorage/sessionStorage。
+
+没有治理账号时保留原本机工作台行为。一旦存在治理账号，匿名调用旧工作台 API 被拒绝；仅具备全部全局管理权限的用户可访问，原显式管理 Bearer token 保持兼容。账号停用或权限减少影响后续请求。此过渡接入不代表旧工作台已经具备按用户/域隔离的数据模型。
+
+当前企业 OSS 后端支持“已有 OSS token → 回查工号 → 映射平台账号”，还没有浏览器 SSO 跳转、回调及统一退出流程。登录页展示该能力状态，不要求用户粘贴 OSS token，也不伪造企业登录按钮。浏览器退出只撤销当前平台会话，不注销企业身份提供方会话或既有治理 API 令牌。
+
+浏览器接口：`GET /api/auth/session` 查询身份与能力，`POST /api/auth/login` 账号登录，`POST /api/auth/logout` 服务端退出；响应禁用缓存。原 `/api/v1/auth/login`、`auth/api-key` 和 `auth/oss` 保持现有契约。
 
 ## 前端构建与测试
 
