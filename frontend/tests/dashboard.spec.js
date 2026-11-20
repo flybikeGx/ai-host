@@ -54,7 +54,7 @@ test('dashboard counts a running conversation once and survives navigation',asyn
 
 test('dashboard mobile and authenticated navigation',async({page})=>{
   await page.setViewportSize({width:390,height:844});
-  await page.route('**/api/**',route=>route.request().headers().authorization==='Bearer dashboard-ui-fixture'?route.continue():route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({detail:'需要 Bearer token'})}));
+  await page.route('**/api/**',route=>new URL(route.request().url()).pathname==='/api/auth/session'||route.request().headers().authorization==='Bearer dashboard-ui-fixture'?route.continue():route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({detail:'需要 Bearer token'})}));
   await page.goto('/dashboard');
   await expect(page.getByRole('heading',{name:'连接本地服务'})).toBeVisible();
   await page.getByLabel('管理 Token',{exact:true}).fill('dashboard-ui-fixture');

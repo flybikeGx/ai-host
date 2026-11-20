@@ -121,6 +121,8 @@ def create_app(config, *, background=True):
     register_knowledge(app, config)
     from .governance.web import register as register_governance
     register_governance(app, config)
+    from .web_auth import register as register_browser_auth
+    register_browser_auth(app)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -139,9 +141,14 @@ def create_app(config, *, background=True):
     async def conversation_busy(request, error):
         return JSONResponse({"detail": str(error)}, status_code=409)
 
-    def authorize(authorization: str | None = Header(default=None)):
-        if token and not secrets.compare_digest(authorization or "", "Bearer " + token):
-            raise HTTPException(401, "需要 Bearer token")
+    def authorize(request: Request, authorization: str | None = Header(default=None)):
+        if token and secrets.compare_digest(authorization or "", "Bearer " + token):
+            return  # Existing CLI/API management credentials remain supported.
+        browser = app.state.browser_auth
+        if browser.required() or request.cookies.get("agent_base_session"):
+            browser.require_workspace(request)
+        elif token:
+            raise HTTPException(401, "需要登录或 Bearer token")
 
     api = [Depends(authorize)]
     from .service_web import register as register_services
@@ -157,6 +164,7 @@ def create_app(config, *, background=True):
     @app.get("/dashboard", response_class=HTMLResponse)
     @app.get("/knowledge", response_class=HTMLResponse)
     @app.get("/services", response_class=HTMLResponse)
+    @app.get("/login", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
