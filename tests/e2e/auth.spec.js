@@ -27,7 +27,12 @@ test('AIHO-12: real cookie login, restore, domain metadata and logout revocation
 });
 test('AIHO-12: viewer cannot enter global workspace',async({page})=>{
   await login(page,'viewer','fixture-member-password');
-  await expect(page.getByRole('heading',{name:'你好，测试成员'})).toBeVisible();
+  // C6: a viewer with agent.read reaches the chat surface read-only instead of
+  // the account landing page, but still has no global admin workspace.
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page.getByRole('button',{name:'仪表盘',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'暂无可发起的新对话'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/新建对话/})).toHaveCount(0);
   expect((await page.request.get('/api/dashboard')).status()).toBe(403);
 });
 test('AIHO-12: persisted expiration rejects refresh',async({page})=>{

@@ -64,8 +64,13 @@ with tempfile.TemporaryDirectory(prefix='agent-base-real-e2e-') as directory:
         assert hashlib.sha256(backup.read_bytes()).hexdigest()==original
         with sqlite3.connect(db) as c: assert c.execute('SELECT owner_user_id,domain_id FROM conversations').fetchall()==before
         with sqlite3.connect(root/'data/control.sqlite') as c: assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='chat.migrate'").fetchone()[0]==1
-        match='contracts' if '--contracts' in sys.argv else 'auth|chat_authz|chat_write|chat_audit'
-        result=subprocess.run(['npx','--no-install','playwright','test','--config','playwright.real.config.js',match],cwd=P/'frontend',env=env)
+        contracts='--contracts' in sys.argv
+        match='contracts' if contracts else 'auth|chat_authz|chat_write|chat_audit|chat_ui'
+        command=['npx','--no-install','playwright','test','--config','playwright.real.config.js',match]
+        # Every frozen contract has been promoted into the must-pass gate, so a
+        # contracts run with no remaining gap is a pass (0 failed), never a skip.
+        if contracts: command.append('--pass-with-no-tests')
+        result=subprocess.run(command,cwd=P/'frontend',env=env)
     finally:
         stop(child,log)
         subprocess.run([sys.executable,'tests/e2e/cleanup.py',str(config)],cwd=P,env=env,check=True)

@@ -107,6 +107,13 @@ try:
         with app.state.governance.store.connection() as conn:
             conn.execute('UPDATE browser_sessions SET expires=?', (time.time()-1,))
         return {'expired': True}
+
+    @app.post('/fixture/auth/shared-token')
+    def shared_token(body: dict | None = None):
+        # Test-only switch for the hybrid `AGENT_BASE_WEB_TOKEN` bootstrap entry.
+        # This fixture never receives the real environment token.
+        app.state.identity_resolver.shared_token = (body or {}).get('token') or None
+        return {'shared_token': bool(app.state.identity_resolver.shared_token)}
     from agent_base.knowledge import Knowledge
     from fastapi.responses import JSONResponse
     knowledge = Knowledge(config)
