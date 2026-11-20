@@ -6,6 +6,7 @@ import secrets
 import threading
 import asyncio
 import json
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -85,8 +86,9 @@ def create_app(config, *, background=True):
     scheduler = Scheduler(config)
     from .repositories import Repositories
     repositories = Repositories(config)
-    from .conversations import Conversations, ConversationBusy
+    from .conversations import Conversations, ConversationBusy, ChatError, ChatForbidden, ChatInvalid
     conversations = Conversations(config)
+    from .identity import Identity, get_page_identity
     from .schedules import Schedules
     schedules = Schedules(scheduler)
     from .dashboard import Dashboard
@@ -145,6 +147,36 @@ def create_app(config, *, background=True):
     async def conversation_busy(request, error):
         return JSONResponse({"detail": str(error)}, status_code=409)
 
+    @app.exception_handler(ChatError)
+    async def chat_error(request, error):
+        return JSONResponse({"detail": error.detail, "code": error.code}, status_code=error.status)
+
+    def chat_scope(identity: Identity, scope: str) -> bool:
+        if scope not in {"own", "all"}:
+            raise ChatInvalid("scope 只能是 own 或 all", code="invalid_scope")
+        if scope == "all" and not (identity.platform_admin or identity.is_bootstrap):
+            raise ChatForbidden("只有平台管理员可以使用只读范围", code="scope_denied")
+        return scope == "all"
+
+    def require_chat(identity: Identity, permission: str) -> None:
+        if identity.user_type == "service":
+            raise ChatForbidden("服务账号不能使用页面对话接口", code="service_account_forbidden")
+        if not identity.can(permission):
+            raise ChatForbidden(f"缺少权限：{permission}", code="permission_denied")
+
+    def default_domain_id():
+        from .chat_migration import default_domain
+        with app.state.governance.store.connection() as conn:
+            row = default_domain(conn)
+        return row[0] if row else None
+
+    def scope_all_audit(identity: Identity, path: str, *, conversation_id=None, count=None, domain_id=None):
+        # §10: every platform-admin scope=all read leaves one attributed audit row.
+        app.state.governance.store.audit(
+            domain_id=domain_id, user_id=identity.user_id, trace_id=None, level="chat",
+            action="chat.scope_all",
+            detail={"path": path, "conversation_id": conversation_id, "count": count, "mode": identity.mode})
+
     def authorize(request: Request, authorization: str | None = Header(default=None)):
         if app.state.identity_resolver.mode == "jwt" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
             from .identity import IdentityError
@@ -177,33 +209,62 @@ def create_app(config, *, background=True):
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
         return FileResponse(static / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/api/chat/targets", dependencies=api)
-    def chat_targets():
-        return conversations.targets()
+    @app.get("/api/chat/targets")
+    def chat_targets(identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.read")
+        return conversations.targets(identity, default_domain_id=default_domain_id())
 
     @app.get("/api/dashboard", dependencies=api)
     def dashboard_snapshot():
         return dashboard.snapshot()
 
-    @app.get("/api/conversations", dependencies=api)
-    def chat_list(archived: bool = False):
-        return conversations.list(archived=archived)
+    @app.get("/api/conversations")
+    def chat_list(archived: bool = False, domain_id: str | None = None, scope: str = "own",
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        if domain_id is not None and domain_id not in identity.domains:
+            raise ChatForbidden("域不可用或未加入", code="domain_forbidden")
+        result = conversations.list(archived=archived, identity=identity, domain_id=domain_id,
+                                    scope_all=scope_all, default_domain_id=default_domain_id())
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations", count=len(result), domain_id=domain_id)
+        return result
 
     @app.post("/api/conversations", dependencies=api, status_code=201)
     def chat_create(body: ChatInput):
         return conversations.create(**body.model_dump())
 
-    @app.get("/api/conversations/{chat_id}", dependencies=api)
-    def chat_get(chat_id: str):
-        return conversations.snapshot(chat_id)
+    @app.get("/api/conversations/{chat_id}")
+    def chat_get(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        result = conversations.snapshot(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}", conversation_id=chat_id,
+                            domain_id=result["conversation"].get("domain_id"))
+        return result
 
-    @app.get("/api/conversations/{chat_id}/files", dependencies=api)
-    def chat_files(chat_id: str):
-        return conversations.files(chat_id)
+    @app.get("/api/conversations/{chat_id}/files")
+    def chat_files(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "file.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/files", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
+        return conversations.files(chat_id, identity, scope_all=scope_all)
 
-    @app.get("/api/conversations/{chat_id}/download", dependencies=api)
-    def chat_download(chat_id: str, path: str):
-        file = conversations.artifact(chat_id, path)
+    @app.get("/api/conversations/{chat_id}/download")
+    def chat_download(chat_id: str, path: str, scope: str = "own",
+                      identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "file.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/download", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
+        file = conversations.artifact(chat_id, path, identity, scope_all=scope_all)
         return FileResponse(file, filename=file.name, media_type="application/octet-stream")
 
     @app.patch("/api/conversations/{chat_id}", dependencies=api)
@@ -218,18 +279,43 @@ def create_app(config, *, background=True):
     def chat_stop(chat_id: str):
         return conversations.cancel(chat_id)
 
-    @app.get("/api/conversations/{chat_id}/events", dependencies=api)
-    async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False):
-        conversations.get(chat_id)
+    @app.get("/api/conversations/{chat_id}/events")
+    async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False,
+                          scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/events", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
         try:
             cursor = max(0, after, int(request.headers.get("last-event-id", "0")))
         except ValueError:
             raise HTTPException(400, "事件游标无效")
+
+        def revoked() -> bool:
+            # §6.3: once the stream is open, a disabled user / removed domain /
+            # revoked permission / scope loss must end it within 30 seconds.
+            try:
+                fresh = app.state.identity_resolver.resolve_page(request)
+            except Exception:
+                return True
+            return (fresh is None or fresh.user_id != identity.user_id
+                    or fresh.current_domain != identity.current_domain
+                    or not fresh.can("task.read")
+                    or (scope_all and not (fresh.platform_admin or fresh.is_bootstrap)))
+
         async def stream():
             nonlocal cursor
             idle = 0
+            checked = time.monotonic()
             while not await request.is_disconnected():
-                batch = await asyncio.to_thread(conversations.events, chat_id, cursor)
+                if time.monotonic() - checked >= 2:
+                    checked = time.monotonic()
+                    if await asyncio.to_thread(revoked):
+                        yield 'event: error\ndata: {"code": "unauthorized"}\n\n'
+                        return
+                batch = await asyncio.to_thread(conversations.events, chat_id, cursor, identity, scope_all=scope_all)
                 for event in batch:
                     cursor = event["seq"]
                     yield f"id: {cursor}\nevent: update\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"

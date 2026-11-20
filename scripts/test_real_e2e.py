@@ -40,14 +40,18 @@ def start(label,failure=False):
 with tempfile.TemporaryDirectory(prefix='agent-base-real-e2e-') as directory:
     root=Path(directory); config=root/'fixture.toml'
     config.write_text('[storage]\nroot="data"\n[runtime]\nengine="dsh"\ncommand=REPLACE_COMMAND\nmodel="fixture-model"\neffort="high"\ntimeout_seconds=20\n'.replace('REPLACE_COMMAND',json.dumps([sys.executable,str(P/'tests/fixtures/fake_dsh.py')])) )
-    env.update(E2E_CONFIG=str(config),E2E_CONTROL=str(root/'data/control.sqlite'))
+    env.update(E2E_CONFIG=str(config),E2E_CONTROL=str(root/'data/control.sqlite'),E2E_DATA=str(root/'data/runs.sqlite'))
     subprocess.run([sys.executable,'tests/e2e/seed.py',str(config)],cwd=P,env=env,check=True)
     child,log=start('first-start'); stop(child,log)
     db=root/'data/runs.sqlite'
     with sqlite3.connect(root/'data/control.sqlite') as control, sqlite3.connect(db) as data:
-        for name in ('developer','peer','foreign'):
+        for name in ('developer','peer','foreign','reader','revoked'):
             user=control.execute('SELECT id,home_domain_id FROM users WHERE username=?',(name,)).fetchone()
             data.execute('UPDATE conversations SET owner_user_id=?,domain_id=? WHERE id=?',(*user,name+'-chat'))
+        default=control.execute("SELECT id FROM domains WHERE code='default'").fetchone()[0]
+        other=control.execute("SELECT id FROM domains WHERE code='other'").fetchone()[0]
+        data.execute("UPDATE repo_installations SET domain_id=? WHERE id='default-agent'",(default,))
+        data.execute("UPDATE repo_installations SET domain_id=? WHERE id='other-agent'",(other,))
     backup=root/'data/runs.sqlite.pre-chat-multiuser'
     original=hashlib.sha256(backup.read_bytes()).hexdigest()
     with sqlite3.connect(backup) as c:
@@ -60,7 +64,8 @@ with tempfile.TemporaryDirectory(prefix='agent-base-real-e2e-') as directory:
         assert hashlib.sha256(backup.read_bytes()).hexdigest()==original
         with sqlite3.connect(db) as c: assert c.execute('SELECT owner_user_id,domain_id FROM conversations').fetchall()==before
         with sqlite3.connect(root/'data/control.sqlite') as c: assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='chat.migrate'").fetchone()[0]==1
-        result=subprocess.run(['npx','--no-install','playwright','test','--config','playwright.real.config.js','contracts' if '--contracts' in sys.argv else 'auth'],cwd=P/'frontend',env=env)
+        match='contracts' if '--contracts' in sys.argv else 'auth|chat_authz'
+        result=subprocess.run(['npx','--no-install','playwright','test','--config','playwright.real.config.js',match],cwd=P/'frontend',env=env)
     finally:
         stop(child,log)
         subprocess.run([sys.executable,'tests/e2e/cleanup.py',str(config)],cwd=P,env=env,check=True)

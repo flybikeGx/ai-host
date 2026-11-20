@@ -82,3 +82,19 @@ C3–C7 状态保持暂停，本任务没有push、PR、合并、部署或付费
 两份Playwright JSON、故障截图、进程日志与summary.json。
 trace里只有隔离环境生成的测试会话，不含启动环境凭据。API-only用例没有截图，
 浏览器失败用例有截图。报告本身提供逐条断言、实际值和代码位置。
+
+## AIHO-16 C3 读路径门禁（2026-11-20）
+
+C3 已实现的读路径契约从 `contracts` 迁入必须通过集合：`scripts/test_real_e2e.py`
+默认同时运行 `auth` 与 `chat_authz`，`--contracts` 只保留 C4–C6 未实现契约。
+`tests/e2e/chat_authz.spec.js` 在真实进程上覆盖：A/B 归属隔离（list/snapshot/events/
+files/download 全 404 且文案一致）、两个安装 Agent 的跨域筛选、Admin Agent 仅平台管理员可见、
+NULL owner 对普通用户与默认管理员读 404、`file.read` 缺失时 snapshot 的 `files` 收敛、
+非管理员 `scope=all` 403、管理员 `scope=all` 只读并落 `chat.scope_all` 审计、
+service 账号读接口 403，以及打开中的 SSE 在账号停用后 30 秒内收到
+`event: error` + `{"code":"unauthorized"}` 并关闭。
+
+阶段限制（C4 落地后移除）：C3 按任务边界不修改 create，因此新建会话仍是
+`owner_user_id IS NULL`。`auth.spec.js` 在创建后调用 `backfillOwners()`，按 C2 迁移的
+回填规则（bootstrap admin + default 域）补齐归属，再验证发送/SSE/历史；这不代表
+C4 的创建授权已实现，contracts 中的跨域写、管理员写旁路与每用户配额仍为失败。

@@ -142,6 +142,26 @@ class IdentityResolver:
                 raise IdentityError(401, "user_disabled", "账号不可用")
             if user["status"] != "active" or user["locked_until"] > time.time():
                 raise IdentityError(401, "user_disabled", "账号不可用")
+        return self._finish(request, page=page, bootstrap=bootstrap, mode=mode, user=user, claims=claims)
+
+    def resolve_page(self, request: Request) -> Identity:
+        """Page identity, preserving the account-free local workspace (§3.3).
+
+        Once accounts exist, the normal hybrid rules apply (loopback BOOTSTRAP
+        or a real session); before any account is created the local workspace
+        stays anonymous-bootstrap exactly as the pre-governance page did.
+        """
+        try:
+            return self.resolve(request, page=True)
+        except IdentityError as error:
+            if (error.code == "token_missing" and self.mode == "hybrid" and not self.shared_token
+                    and not self.app.state.browser_auth.required()):
+                return self._finish(request, page=True, bootstrap=True, mode="bootstrap",
+                                    user=None, claims=None)
+            raise
+
+    def _finish(self, request, *, page, bootstrap, mode, user, claims) -> Identity:
+        gov = self.gov
         admin = bootstrap or is_platform_admin(gov, user["id"])
         enabled = [d for d in gov.list_domains() if d["status"] == "active"]
         memberships = set() if user is None else {m["domain_id"] for m in gov.store.list_memberships(user["id"])}
@@ -164,6 +184,11 @@ class IdentityResolver:
 
 def get_identity(request: Request) -> Identity:
     return request.app.state.identity_resolver.resolve(request, page=not request.url.path.startswith("/api/v1/"))
+
+
+def get_page_identity(request: Request) -> Identity:
+    """Page-surface dependency used by the chat data routes."""
+    return request.app.state.identity_resolver.resolve_page(request)
 
 
 def get_bearer_identity(request: Request) -> Identity:
