@@ -123,3 +123,14 @@ C5 实现后，审计契约从 `contracts` 迁入必须通过集合：`scripts/t
 形状、`?trace_id=` 与 `?user_id=` 查询、正文/标题/产物/凭据不入库，以及
 审计写入被真实 SQLite trigger 拒绝时创建、发送、停止、下载与 `scope=all` 读取仍成功
 并记录本地错误日志。C6 前端门控不在本阶段范围内，继续由 `--contracts` 单独报告失败。
+
+## AIHO-20 C7 契约门禁收口（2026-11-20）
+
+C6 把最后一条前端契约迁入必过集后，`tests/e2e/contracts.spec.js` 已删除，`--contracts` 的「未实现契约」套件成为历史。C7 的处理：
+
+- `scripts/test_real_e2e.py` 只保留默认必过集（`auth|chat_authz|chat_write|chat_audit|chat_ui`），不再有 `--contracts` 分支，也不用 `--pass-with-no-tests` 把空套件当通过。
+- `scripts/ci.py contracts` 改为**必过集覆盖断言**（`scripts/contracts.py`）：对 §14 的 C1–C7 逐条断言仍有具名 pytest 用例 / 真实 E2E 用例 / `frontend/tests` 用例，并断言 `full` 仍执行 `unit`、`browser-ui`、`real-e2e`、`mock-restart`。任一条缺失即 exit 1；`tests/test_contracts_coverage.py` 自检「空套件不能通过」。
+- `scripts/ci.py full` 新增 `browser-ui` 阶段，默认执行 `frontend/tests` 的 31 条 Playwright，C6 前端门控不再需要手工命令。
+- 契约行为仍由 `full` 执行；`contracts` 只审计覆盖，不重复跑测试。两者都通过才算「契约必过集完整且全绿」。
+
+覆盖清单与命令、退出码、耗时记录见 [C7Validation.md](C7Validation.md)。

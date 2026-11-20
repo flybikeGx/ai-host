@@ -98,16 +98,22 @@ def main():
         else:
             if not (ROOT/'.venv/bin/python').exists() or not (ROOT/'frontend/node_modules').exists():
                 raise FileNotFoundError('Run python3 scripts/ci.py bootstrap first')
-            run('unit',[str(ROOT/'.venv/bin/python'),'-m','pytest','-q'])
-            run('build',['npm','run','build'],ROOT/'frontend')
-            if args.mode != 'quick':
+            if args.mode == 'contracts':
+                # Every frozen contract is already promoted into `full`; this
+                # mode audits that the must-pass set still covers C1–C7 and
+                # fails on an empty or shrunken suite.
+                run('contracts',[str(ROOT/'.venv/bin/python'),'scripts/contracts.py'])
+            else:
+                run('unit',[str(ROOT/'.venv/bin/python'),'-m','pytest','-q'])
+                run('build',['npm','run','build'],ROOT/'frontend')
+            if args.mode == 'full':
+                # The chat page gate lives in the browser suite; `full` must run
+                # it, not leave it to a hand-typed command (AIHO-20 C7).
+                run('browser-ui',['npx','--no-install','playwright','test'],ROOT/'frontend')
                 run('browser-version',['npx','--no-install','playwright','--version'],ROOT/'frontend')
                 run('chromium-version',['node','--input-type=module','-e',
                     "import {chromium} from '@playwright/test'; import {execFileSync} from 'node:child_process'; console.log(execFileSync(chromium.executablePath(), ['--version'], {encoding:'utf8'}));"],ROOT/'frontend')
-                cmd=[str(ROOT/'.venv/bin/python'),'scripts/test_real_e2e.py']
-                if args.mode == 'contracts':
-                    cmd.append('--contracts')
-                run('real-e2e',cmd)
+                run('real-e2e',[str(ROOT/'.venv/bin/python'),'scripts/test_real_e2e.py'])
                 run('mock-restart',[str(ROOT/'.venv/bin/python'),'tests/e2e/mock_restart.py'])
         result['status'] = 'passed'
     except subprocess.TimeoutExpired:

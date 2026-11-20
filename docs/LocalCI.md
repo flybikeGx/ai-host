@@ -9,7 +9,13 @@ python3 scripts/ci.py full
 python3 scripts/ci.py contracts
 ```
 
-bootstrap 使用 uv.lock / package-lock.json 冻结安装及项目 `.ci-browsers` Chromium；需要网络下载 Python/包/浏览器。依赖与浏览器就绪后的检查可离线运行，测试只用本机 fake CLI，无真实账号或付费模型。quick 是全部 pytest 与前端构建；full 再运行真实后端、SQLite 迁移/重启、浏览器、SSE/产物和模拟认证重启检查。contracts 独立执行未实现契约，失败照常非零，不作为已实现行为通过的依据。AIHO-17 起 full 同时执行 auth、chat_authz 与 chat_write（C3 读路径、C4 写路径与配额契约）；AIHO-18 起再加入 chat_audit（C5 审计与 trace），contracts 只保留 C6。
+bootstrap 使用 uv.lock / package-lock.json 冻结安装及项目 `.ci-browsers` Chromium；需要网络下载 Python/包/浏览器。依赖与浏览器就绪后的检查可离线运行，测试只用本机 fake CLI，无真实账号或付费模型。
+
+- `quick`：全部 pytest + 前端构建。
+- `full`：quick 之后依次运行 `browser-ui`（`frontend/tests` 的 31 条 Playwright，真实浏览器 + fixture 后端）、浏览器版本检查、`real-e2e`（`tests/e2e/*.spec.js`，真实 uvicorn + SQLite + Chromium，含 C3–C6 契约与迁移/重启/故障启动校验）、`mock-restart`（进程内 token 状态补测）。C1–C6 新增/扩展的测试都在默认套件里，不靠手工命令。
+- `contracts`：**必过集覆盖断言**，不执行测试。C1–C6 的契约已全部迁入 `full`；该模式检查 `docs/CHAT_MULTIUSER_DESIGN.md` §14 的 C1–C7 每行仍有具名必过测试，并确认这些测试仍被 `full` 执行（`scripts/ci.py` 的 stage 名与 `scripts/test_real_e2e.py` 的匹配式）。空套件、测试改名或移除某个套件都会失败，不再有「0 测试通过」的空转通过。结果写入报告目录的 `contracts.json`。
+
+`ci.py full` 的 `browser-ui` 会启动 Chromium；在受限沙箱/无图形环境里首次拉起浏览器可能因用户目录权限失败，这是环境问题（`environment_error` 或阶段失败），不是产品断言失败，按下面「排障」在新 clone 或正常桌面会话重跑。
 
 每次检查生成唯一 `.ci-reports/<时间-随机标识>/report.json`：commit、dirty、系统/架构、工具版本、阶段命令与退出码。各阶段日志、Playwright JSON、HTML、失败 trace/截图保存在同目录。退出码：0通过、1检查失败、2环境缺失、124超时、130取消。用 `--timeout 60` 控制整个检查的阶段预算。日志只继承白名单环境，不继承 API key/token；仅包含合成账号，分享前仍应检查机器路径及测试输出。报告目录不会自动删除；成员确认不再需要后自行删除旧目录。每阶段监督器用psutil记录子进程及创建时间，跟踪独立session中的后代；正常结束、取消、超时均清理已记录后代，再清理本阶段独立进程组，不按进程名称清理；端口动态分配、数据在临时目录内，不访问业务库。不同checkout的依赖、浏览器及报告分离；同checkout并行构建不支持，应使用独立checkout。
 

@@ -172,6 +172,8 @@ flowchart TB
 - Admin 不占仓库执行位置；repo 每轮关联一个 Run。
 - 页面：`/login`（已有账号登录，无注册入口）、`/chat`（对话）、`/dashboard`（仪表盘：MCP/Agent/工作区/系统指标，只读采样）、`/services`（共享服务管理）、`/knowledge`（知识库管理）、`/cron`（定时计划）。
 - Web 安全：默认 loopback 绑定、TrustedHost、跨 Origin 写拒绝、原 `AGENT_BASE_WEB_TOKEN`；账号启用后浏览器使用服务端会话，全局工作台限全局管理员，普通用户可登录本人信息页。治理 API/RBAC 仍由 `/api/v1` 提供（§13）。
+- **身份与 chat 数据流（2026-11-20）**：浏览器 Cookie 或 Bearer → `identity.get_page_identity` 解析唯一 `Identity`（重读用户状态、域 membership、当前域权限）→ chat 路由只接收 `identity`，按 id 的读写都经 `conversations.owned()` 收口（非本人/不存在/NULL owner/域不可见统一 404）→ 每个动作写 `chat.*` 审计（`trace_id` 对 send/stop 为 `turn_id`）。`GET /api/v1/me` 返回 `domains[].permissions`，前端只据此显隐入口。
+- **隔离与配额**：会话列表恒按 owner 过滤，Agent 列表按当前域且 Admin Agent 仅平台管理员；`scope=all` 只对平台管理员开放、只读并每次审计；每用户 8 个活跃轮次 / 4 条 SSE（进程内计数），全局 32 与单会话 1 轮沿用。迁移在启动时幂等回填 `owner_user_id` / `domain_id` 并做一次性备份，NULL owner 不表示公共可见（对所有人 404，含 `scope=all`）。契约与判定顺序见 [CHAT_MULTIUSER_DESIGN.md](CHAT_MULTIUSER_DESIGN.md)。
 - 详见 [WebChat.md](WebChat.md)、[Dashboard.md](Dashboard.md)。
 
 ## 11. Admin MCP 与看护 Agent
@@ -255,6 +257,7 @@ flowchart TB
 | `governance/oss.py` | `OssAuth` 客户端：`verify(token)` 把 OSS 签发的 token 透传给 `POST {endpoint}/auth/getUserDetail`（`X-Auth-Token`）回查 `{w3account, department, region}`；密码不经平台 |
 | `governance/web.py` | `/api/v1` 路由 + JWT 依赖 + 权限门控（`x-domain-id` 定域）：auth/login、auth/oss、auth/api-key、me、permissions、domains、users、roles、groups、memberships、grants、audit |
 | `web_auth.py` / `AuthShell.jsx` | 浏览器账号登录、HttpOnly 会话恢复/退出、过期处理、全局工作台过渡门控及普通用户账号页；原治理 Bearer 接口保持兼容 |
+| `identity.py` / `chat_migration.py` / `chat_audit.py` / `conversations.owned()` | chat 页面面的 `Identity` 统一解析（Cookie / Bearer / 本机引导）、启动时幂等迁移与一次性备份、`chat.*` 审计、按 id 归属收口；`/me` 增加 `domains[].permissions` 与 `POST /api/v1/auth/refresh`（C1–C5，契约见 [CHAT_MULTIUSER_DESIGN.md](CHAT_MULTIUSER_DESIGN.md)） |
 | `mocks/oss.py` | 本地模拟 OSS 统一登录 REST（I-4 验证）：`/auth/login`（工号+密码换 token）、`/auth/getUserDetail`（凭 `X-Auth-Token` 回查）、`/health`；演示工号 `w000001/2/3` |
 | `mocks/mcp.py` | 模拟通用 MCP 服务器（`echo`/`add`），streamable-http（remote）/stdio（embedded）双模，验证网关统一调用与反向代理 |
 | `mocks/knowledge.py` | 模拟知识库 MCP（`knowledge_catalog/search/read/submit`），契约对齐真实 `knowledge_mcp.py`，验证知识库经注册表接入网关 |
@@ -332,6 +335,9 @@ flowchart TB
 - 会话授权签发依赖 Web 管理面身份；对外开放前需独立主体模型（见路线图）。
 - Windows 真机、真实内网（CodeAgent、企业代理/CA、真实工单后端）为现场待验收项。
 - 知识库扩展（Installation 声明式绑定、分层过滤、自动退避恢复、导入导出）未实现。
+- chat 页面面的多用户接入是**单进程**实现：每用户 SSE 连接计数在内存中，`agent-base serve` 多 worker/多进程时各自计数，不能作为全局配额；本期不支持。会话列表与按 id 访问已按 owner+domain 收敛，但同机其他用户仍共享进程、配置与数据库文件，不能当作多租户安全沙箱。
+- 页面面默认只绑定 loopback，`TrustedHostMiddleware` 只接受本机 Host；跨主机访问必须由反向代理终止 HTTPS 并保持允许的 Host，不能为「先能用」放宽该校验。浏览器 Cookie 会话 20 分钟绝对到期需重登；Bearer `refresh` 无状态换新、没有绝对会话上限。
+- `conversations.owner_user_id IS NULL` 的存量会话对所有人 404（含平台管理员 `scope=all`），不做额外回填（glisxx 2026-11-20 决策 A）；这是 §8.2 表格与 §5.3 冻结代码的已记录差异，实现采用 §5.3 顺序。
 
 ## 18. 演进路线
 

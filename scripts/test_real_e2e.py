@@ -64,12 +64,11 @@ with tempfile.TemporaryDirectory(prefix='agent-base-real-e2e-') as directory:
         assert hashlib.sha256(backup.read_bytes()).hexdigest()==original
         with sqlite3.connect(db) as c: assert c.execute('SELECT owner_user_id,domain_id FROM conversations').fetchall()==before
         with sqlite3.connect(root/'data/control.sqlite') as c: assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='chat.migrate'").fetchone()[0]==1
-        contracts='--contracts' in sys.argv
-        match='contracts' if contracts else 'auth|chat_authz|chat_write|chat_audit|chat_ui'
+        # Every frozen contract is part of the must-pass gate, so there is no
+        # separate gap suite anymore: contracts coverage is audited by
+        # scripts/contracts.py instead of an empty Playwright run.
+        match='auth|chat_authz|chat_write|chat_audit|chat_ui'
         command=['npx','--no-install','playwright','test','--config','playwright.real.config.js',match]
-        # Every frozen contract has been promoted into the must-pass gate, so a
-        # contracts run with no remaining gap is a pass (0 failed), never a skip.
-        if contracts: command.append('--pass-with-no-tests')
         result=subprocess.run(command,cwd=P/'frontend',env=env)
     finally:
         stop(child,log)

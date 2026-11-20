@@ -580,9 +580,18 @@ C0 冻结（commit `cec82a5`）之后，主干又合入了 HttpOnly cookie 会�
 - §3.5 的 refresh 端点保留给 Bearer 客户端，cookie 会话的续期方式（滑动或过期重登）由 C1 明确并在交付说明中记录；
 - 本条只影响身份传输与前端起点，**不改变**权限表、错误码判定顺序、域规则与迁移 DDL。
 
+### 16.4 C7 收口记录（2026-11-20）
+
+- **基线**：C1–C6 已验收并合入 `a0c6c32`（C6 分支 `agent/mika/aiho-19`）。C7 交付在其之上，保留 `b7d9e12` / `5b4e110` / `237d4fe` / `f7dba50` 为祖先；不 push、不合并、不部署。
+- **§14 矩阵对应**：C1–C5 由 pytest 默认套件覆盖（`tests/test_web_auth.py`、`test_chat_migration.py`、`test_chat_authz.py`、`test_chat_quota.py`、`test_chat_audit.py`）；C6 前端 Playwright 31 条已纳入 `scripts/ci.py full` 的 `browser-ui` 阶段；真实进程 E2E（`tests/e2e/*.spec.js`，含 C3–C6 契约）由 `real-e2e` 阶段执行；C7 回归记录见 [C7Validation.md](C7Validation.md)。
+- **契约门禁语义变更**：`python3 scripts/ci.py contracts` 不再运行一套「未实现契约」。C1–C6 的契约已全部迁入必过门禁，该模式改为**必过集覆盖断言**：逐条检查本节 §14 的 C1–C7 仍有具名必过测试、且对应套件仍被 `full` 执行；空套件、测试改名或移除套件都直接失败（`scripts/contracts.py`，自检 `tests/test_contracts_coverage.py`）。
+- **已决契约（NULL owner，决策 A）**：§8.2 表格写「`owner_user_id IS NULL` → 平台管理员 `scope=all` 只读可见」，而 §5.3 冻结代码在 `scope_all` 分支之前先判「`owner_user_id IS NULL` 且非引导身份 → 404」，两者对平台管理员 `scope=all` 的 NULL owner 结论不一致。glisxx 2026-11-20 选 **A**：采用 §5.3 冻结代码的顺序，**NULL owner 对所有人（含平台管理员 `scope=all`）都是 404，不做额外回填**。理由：①§5.3 是冻结的代码级收口与固定调用点规范，§8.2 是语义表；②「NULL 永远不等于公共可见」与 D3 的防枚举目标优先；③NULL 只存在于迁移前存量或引导期无 admin 的场景，C4 起新建会话即写 owner；④追加回填会把引导期会话凭空归给某个管理员，改变可见性事实。§8.2 表格保持冻结原文不改，以本条为差异记录；实现与测试见 `tests/test_chat_authz.py`、`tests/e2e/chat_authz.spec.js`。
+- **部署前提与过渡限制**：`TrustedHostMiddleware` 只允许本机 Host，服务默认 bind loopback，跨主机需反向代理 + HTTPS，不得为「先能用」放宽 Host 校验；每用户 SSE 计数为单进程实现；浏览器 Cookie 会话 20 分钟绝对到期需重登，Bearer `refresh` 无状态换新、无绝对会话上限。用户可见说明见 [WebChat.md](WebChat.md) 的「部署前提」「过渡限制」。
+
 ## 17. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v1.0 | 2026-11-19 | 首版：冻结身份、权限、错误、域、迁移、并发、审计与前端契约；新增 D6–D10 |
 | v1.1 | 2026-11-19 | 评审确认（D2 / D6 / D7、7 任务切分）；新增 §16 子任务索引与 cookie 会话实施注记；冻结项未改 |
+| v1.2 | 2026-11-20 | C7 收口：记录 NULL owner 决策 A 与 §8.2/§5.3 差异、契约门禁覆盖断言、部署前提与过渡限制；冻结项与 §8.2 原文未改 |
