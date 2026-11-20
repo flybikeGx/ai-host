@@ -121,8 +121,12 @@ def create_app(config, *, background=True):
     register_knowledge(app, config)
     from .governance.web import register as register_governance
     register_governance(app, config)
+    from .chat_migration import migrate_chat
+    migrate_chat(repositories.store, app.state.governance.store)
     from .web_auth import register as register_browser_auth
     register_browser_auth(app)
+    from .identity import register as register_identity
+    register_identity(app, config)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -142,12 +146,15 @@ def create_app(config, *, background=True):
         return JSONResponse({"detail": str(error)}, status_code=409)
 
     def authorize(request: Request, authorization: str | None = Header(default=None)):
-        if token and secrets.compare_digest(authorization or "", "Bearer " + token):
+        if app.state.identity_resolver.mode == "jwt" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
+            from .identity import IdentityError
+            raise IdentityError(401, "token_invalid", "不接受共享令牌")
+        if app.state.identity_resolver.mode == "hybrid" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
             return  # Existing CLI/API management credentials remain supported.
         browser = app.state.browser_auth
         if browser.required() or request.cookies.get("agent_base_session"):
             browser.require_workspace(request)
-        elif token:
+        elif token or app.state.identity_resolver.mode == "jwt":
             raise HTTPException(401, "需要登录或 Bearer token")
 
     api = [Depends(authorize)]
@@ -245,8 +252,22 @@ def create_app(config, *, background=True):
         return repositories.list()
 
     @app.post("/api/repos/install", dependencies=api, status_code=201)
-    def install_repo(body: RepoInput):
-        return repositories.install(body.origin, body.ref)
+    def install_repo(body: RepoInput, request: Request):
+        from .chat_migration import default_domain
+        # Keep existing repos authorization; resolve page identity only when
+        # supplied. CLI/shared-token callers retain the default-domain fallback.
+        domain_id = None
+        if request.cookies.get("agent_base_session") or (
+            request.headers.get("authorization") and
+            request.headers.get("authorization") != "Bearer " + (token or "")
+        ):
+            identity = app.state.identity_resolver.resolve(request, page=True)
+            domain_id = identity.current_domain
+        if domain_id is None:
+            with app.state.governance.store.connection() as conn:
+                domain = default_domain(conn)
+                domain_id = domain[0] if domain else None
+        return repositories.install(body.origin, body.ref, domain_id=domain_id)
 
     @app.post("/api/repos/{installation_id}/start", dependencies=api)
     def start_repo(installation_id: str):

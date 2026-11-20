@@ -54,12 +54,22 @@ def issue_token(payload: dict, secret: str, *, ttl: int = 1200) -> str:
 def decode_token(token: str, secret: str) -> dict:
     try:
         body, sig = token.split(".", 1)
-    except ValueError:
-        raise ValueError("令牌格式无效")
-    expected = _b64(hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest())
-    if not hmac.compare_digest(sig, expected):
-        raise ValueError("令牌签名无效")
-    payload = json.loads(_unb64(body))
-    if int(payload.get("exp", 0)) < time.time():
-        raise ValueError("令牌已过期")
-    return payload
+        expected = _b64(hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, expected):
+            raise ValueError("令牌签名无效")
+        payload = json.loads(_unb64(body))
+        if not isinstance(payload, dict) or not isinstance(payload.get("sub"), str) or not payload["sub"]:
+            raise ValueError("令牌身份无效")
+        expiry = payload.get("exp")
+        if isinstance(expiry, bool) or not isinstance(expiry, (int, float)):
+            raise ValueError("令牌有效期无效")
+        import math
+        if not math.isfinite(expiry):
+            raise ValueError("令牌有效期无效")
+        if expiry <= time.time():
+            raise ValueError("令牌已过期")
+        return payload
+    except (ValueError, TypeError, UnicodeError) as error:
+        if str(error) == "令牌已过期":
+            raise ValueError("令牌已过期") from None
+        raise ValueError("令牌无效") from None

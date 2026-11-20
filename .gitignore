@@ -38,3 +38,5 @@ frontend/dist/
 
 # 本地工单
 /tickets/
+.ci-reports/
+.ci-browsers/
