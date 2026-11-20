@@ -2,17 +2,6 @@
 import {test,expect} from '../../frontend/node_modules/@playwright/test/index.mjs';
 import {execFileSync} from 'node:child_process';
 const password='fixture-browser-password';
-// Until C4 stamps owner_user_id at creation time, apply the C2 backfill rule
-// (NULL -> bootstrap admin + default domain) to conversations the read-path
-// tests then open, exactly as the startup migration does for older rows.
-function backfillOwners(){
-  execFileSync(process.env.E2E_PYTHON,['-c',
-    "import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); c=sqlite3.connect(sys.argv[2]);"
-    +"admin=c.execute(\"SELECT id FROM users WHERE username='admin'\").fetchone()[0];"
-    +"default=c.execute(\"SELECT id FROM domains WHERE code='default'\").fetchone()[0];"
-    +"d.execute(\"UPDATE conversations SET owner_user_id=?,domain_id=COALESCE(domain_id,?) WHERE owner_user_id IS NULL\",(admin,default));"
-    +"d.commit()", process.env.E2E_DATA, process.env.E2E_CONTROL]);
-}
 async function login(page,user='admin',pass=password){
   await page.goto('/login');
   await page.getByLabel('账号',{exact:true}).fill(user);
@@ -55,7 +44,7 @@ test('real scheduler, SSE, artifact bytes, conflict, stop, rename and archive',a
  await login(page);await expect(page).toHaveURL(/dashboard$/);
  const r=page.request;
  const created=await r.post('/api/conversations',{data:{title:'E2E native execution'}});expect(created.status()).toBe(201);
- const chat=(await created.json()).id;backfillOwners();
+ const chat=(await created.json()).id;
  const sent=await r.post(`/api/conversations/${chat}/messages`,{data:{text:'E2E deterministic message',client_key:'e2e-1'}});expect(sent.status()).toBe(202);
  await expect.poll(async()=>{const x=await (await r.get(`/api/conversations/${chat}`)).json();return x.turns[0].status;},{timeout:25000}).toBe('succeeded');
  const events=await r.get(`/api/conversations/${chat}/events?once=true`);
@@ -70,10 +59,8 @@ test('real scheduler, SSE, artifact bytes, conflict, stop, rename and archive',a
 });
 test('browser chat sends through real SSE and restores persisted history',async({page})=>{
  await login(page);await expect(page).toHaveURL(/dashboard$/);
- // C3 does not stamp ownership on create (C4); create over HTTP, apply the
- // migration backfill, then drive the real browser send/SSE/history path.
  const created=await page.request.post('/api/conversations',{data:{title:'browser history'}});
- expect(created.status()).toBe(201);const chat=(await created.json()).id;backfillOwners();
+ expect(created.status()).toBe(201);const chat=(await created.json()).id;
  await page.goto('/chat#'+chat);
  await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();
  await page.getByRole('textbox',{name:'消息',exact:true}).fill('E2E browser message');

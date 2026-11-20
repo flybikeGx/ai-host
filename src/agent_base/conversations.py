@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -15,7 +16,7 @@ from pathlib import Path
 from .config import PROJECT, validate_selection
 from .engines import dsh_command, dsh_patch, parse_dsh_output, runtime_environment
 from .package import within
-from .processes import Cancelled, DeadlineExceeded, alive, identity, kill_tree, run_process, spawn_options
+from .processes import Cancelled, DeadlineExceeded, alive, identity as process_identity, kill_tree, run_process, spawn_options
 from .repositories import Repositories, installation_lock
 from .store import Store
 
@@ -55,6 +56,46 @@ class ChatInvalid(ChatError):
     status = 400
 
 
+class ChatQuota(ChatError):
+    """429 for per-user turn or stream quotas (§9, frozen codes)."""
+
+    status = 429
+    code = "user_turn_quota"
+
+
+class StreamLimiter:
+    """Per-process per-user SSE connection counter (§9).
+
+    Multi-worker deployments need shared storage; ``agent-base serve`` is a
+    single process for this phase, documented by C7.
+    """
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.lock = threading.Lock()
+        self.counts: dict[str, int] = {}
+
+    def acquire(self, key: str) -> bool:
+        with self.lock:
+            current = self.counts.get(key, 0)
+            if current >= self.limit:
+                return False
+            self.counts[key] = current + 1
+            return True
+
+    def release(self, key: str) -> None:
+        with self.lock:
+            current = self.counts.get(key, 0)
+            if current <= 1:
+                self.counts.pop(key, None)
+            else:
+                self.counts[key] = current - 1
+
+    def count(self, key: str) -> int:
+        with self.lock:
+            return self.counts.get(key, 0)
+
+
 class Conversations:
     def __init__(self, config):
         self.config = config
@@ -91,11 +132,27 @@ class Conversations:
     def _target_domain(item, default_domain_id):
         return item.get("domain_id") or default_domain_id
 
-    def create(self, target="admin", *, title=None, model=None, effort=None):
+    def create(self, target="admin", *, title=None, model=None, effort=None,
+               identity=None, default_domain_id=None):
+        """Create a conversation (§5.1 POST /api/conversations).
+
+        HTTP callers pass an identity: ``agent.run`` is checked by the route,
+        the target must be visible in ``targets()`` (otherwise 404) and the row
+        is stamped with the caller's owner id and current domain (§7.5/§8.6).
+        ``identity=None`` is the trusted local caller path and keeps the
+        pre-governance NULL owner/domain behaviour.
+        """
         if self.config.runtime.get("engine", "dsh") != "dsh":
             raise ValueError("网页连续对话目前使用 dsh；CodeAgent 会话适配尚未完成")
-        selected = next((item for item in self.targets()["targets"] if item["id"] == target), None)
-        if not selected or not selected["available"]:
+        selected = next((item for item in self.targets(identity, default_domain_id=default_domain_id)["targets"]
+                         if item["id"] == target), None)
+        if selected is None:
+            if identity is not None:
+                raise ChatNotFound("Agent 不存在", code="agent_not_found")
+            raise ValueError("Agent 不存在或已停用，请先在管理页面启动资源")
+        if not selected["available"]:
+            if identity is not None:
+                raise ChatInvalid("Agent 不存在或已停用，请先在管理页面启动资源", code="invalid_request")
             raise ValueError("Agent 不存在或已停用，请先在管理页面启动资源")
         runtime = {**self.config.runtime}
         if model:
@@ -110,9 +167,19 @@ class Conversations:
         (self.config.data / "conversations" / chat_id).mkdir(parents=True, mode=0o700)
         spec = {"runtime": runtime, "auto_title": not bool(title), "agent_name": selected["name"]}
         now = time.time()
+        owner = identity.user_id if identity is not None else None
+        domain = identity.current_domain if identity is not None else None
         with self.store.connection() as conn:
-            conn.execute("INSERT INTO conversations(id,title,target,spec,created,updated) VALUES(?,?,?,?,?,?)",
-                         (chat_id, name, target, json.dumps(spec), now, now))
+            if identity is None:
+                # Trusted local callers keep the pre-governance shape; the C2
+                # migration columns exist only after create_app's startup hook.
+                conn.execute("INSERT INTO conversations(id,title,target,spec,created,updated)"
+                             " VALUES(?,?,?,?,?,?)",
+                             (chat_id, name, target, json.dumps(spec), now, now))
+            else:
+                conn.execute("INSERT INTO conversations(id,title,target,spec,created,updated,owner_user_id,domain_id)"
+                             " VALUES(?,?,?,?,?,?,?,?)",
+                             (chat_id, name, target, json.dumps(spec), now, now, owner, domain))
         return self.get(chat_id)
 
     def get(self, chat_id):
@@ -255,8 +322,11 @@ class Conversations:
             raise ChatInvalid("文件超过 64 MiB")
         return file
 
-    def rename(self, chat_id, title=None, archived=None):
-        self.get(chat_id)
+    def rename(self, chat_id, *, identity=None, title=None, archived=None):
+        if identity is not None:
+            self.owned(chat_id, identity)  # owner only; never scope_all on writes
+        else:
+            self.get(chat_id)
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if archived and conn.execute("SELECT 1 FROM conversation_turns WHERE conversation_id=? AND status IN ('queued','running')", (chat_id,)).fetchone():
@@ -269,13 +339,22 @@ class Conversations:
                 conn.execute("UPDATE conversations SET archived=?,updated=? WHERE id=?", (int(archived), time.time(), chat_id))
         return self.get(chat_id)
 
-    def send(self, chat_id, text, client_key):
+    def send(self, chat_id, text, client_key, identity=None):
+        """Accept one turn after ownership, lifecycle and quota checks.
+
+        The per-user active-turn count and the insert share one
+        ``BEGIN IMMEDIATE`` transaction (§9) so concurrent requests cannot
+        both pass the limit. The global 32-turn cap stays as the 409 fallback.
+        """
+        if identity is not None:
+            chat = self.owned(chat_id, identity)  # object 404 before body 400
+        else:
+            chat = self.get(chat_id)
         if not isinstance(text, str) or not text.strip() or len(text.encode()) > 64 * 1024:
             raise ValueError("消息须为非空文本且不超过 64 KiB")
         if not isinstance(client_key, str) or not 1 <= len(client_key) <= 200:
             raise ValueError("请为本次消息提供有效 client_key")
         self.reconcile()
-        chat = self.get(chat_id)
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute("SELECT * FROM conversation_turns WHERE conversation_id=? AND client_key=?", (chat_id, client_key)).fetchone()
@@ -284,9 +363,18 @@ class Conversations:
                     raise ValueError("同一 client_key 不能发送不同内容")
                 return {**self.public_turn(dict(existing)), "duplicate": True}
             if chat["archived"]:
-                raise ValueError("请先恢复已归档对话")
+                raise ChatInvalid("请先恢复已归档对话", code="conversation_archived")
             if conn.execute("SELECT 1 FROM conversation_turns WHERE conversation_id=? AND status IN ('queued','running')", (chat_id,)).fetchone():
                 raise ConversationBusy("本对话还有一轮正在处理，请等待或停止后再发送")
+            if identity is not None:
+                # §9: a user's active turns aggregate over conversations they
+                # own; trusted local callers have no user bucket.
+                active = conn.execute(
+                    "SELECT count(*) FROM conversation_turns t JOIN conversations c ON c.id=t.conversation_id"
+                    " WHERE c.owner_user_id IS ? AND t.status IN ('queued','running')",
+                    (chat.get("owner_user_id"),)).fetchone()[0]
+                if active >= self.config.per_user_max_turns:
+                    raise ChatQuota("已达到每用户同时进行的对话上限，请先停止其他对话", code="user_turn_quota")
             if conn.execute("SELECT count(*) FROM conversation_turns WHERE status IN ('queued','running')").fetchone()[0] >= 32:
                 raise ConversationBusy("对话队列已满，请稍后重试")
             turn_id = uuid.uuid4().hex
@@ -295,6 +383,7 @@ class Conversations:
             run_id = None
             if chat["target"] != "admin":
                 spec = {"installation_id": chat["target"], "runtime": chat["spec"]["runtime"], "conversation_id": chat_id,
+                        "user_id": chat.get("owner_user_id"), "domain_id": chat.get("domain_id"),
                         "max_concurrent": self.config.max_concurrent, "kind": "conversation"}
                 run_id = self.store.insert(conn, spec)
             now = time.time()
@@ -310,7 +399,7 @@ class Conversations:
             with (root / "supervisor.log").open("ab") as log:
                 child = subprocess.Popen([sys.executable, "-m", "agent_base", "--config", str(self.config.path), "_chat_execute", turn_id],
                     env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **spawn_options())
-            self.update_turn(turn_id, pid=child.pid, birth=identity(child.pid))
+            self.update_turn(turn_id, pid=child.pid, birth=process_identity(child.pid))
         except OSError as error:
             self.finish(turn_id, "failed", str(error))
         return {**self.public_turn(self.turn(turn_id)), "duplicate": False}
@@ -357,8 +446,11 @@ class Conversations:
             self.store.update(turn["run_id"], status=status, error=error, session_status="finished" if status == "succeeded" else status,
                               result={"kind": "conversation", "text": answer, "verification": "conversation_only"}, process_pid=None, process_birth=None)
 
-    def cancel(self, chat_id):
-        self.get(chat_id)
+    def cancel(self, chat_id, identity=None):
+        if identity is not None:
+            self.owned(chat_id, identity)  # owner only; no administrator write bypass
+        else:
+            self.get(chat_id)
         with self.store.connection() as conn:
             row = conn.execute("SELECT * FROM conversation_turns WHERE conversation_id=? AND status IN ('queued','running')", (chat_id,)).fetchone()
         if not row:
@@ -381,7 +473,7 @@ class Conversations:
     def execute(self, turn_id):
         with self.store.connection() as conn:
             changed = conn.execute("UPDATE conversation_turns SET executor_started=1,pid=?,birth=?,updated=? WHERE id=? AND status='queued' AND executor_started=0",
-                (os.getpid(), identity(os.getpid()), time.time(), turn_id)).rowcount
+                (os.getpid(), process_identity(os.getpid()), time.time(), turn_id)).rowcount
         if not changed:
             return
         turn = self.turn(turn_id)
@@ -396,7 +488,7 @@ class Conversations:
         signal.signal(signal.SIGINT, lambda *_: self.update_turn(turn_id, cancel_requested=1))
         if run_id:
             with self.store.connection() as conn:
-                conn.execute("UPDATE runs SET executor_started=1,pid=?,birth=?,updated=? WHERE id=?", (os.getpid(), identity(os.getpid()), time.time(), run_id))
+                conn.execute("UPDATE runs SET executor_started=1,pid=?,birth=?,updated=? WHERE id=?", (os.getpid(), process_identity(os.getpid()), time.time(), run_id))
         try:
             with installation_lock(home / "session.lock", 5):
                 if run_id:
@@ -407,8 +499,8 @@ class Conversations:
                             raise RuntimeError("对话运行已中断")
                         from .service import Service
                         Service(self.config).reconcile()
-                        self.update_turn(turn_id, pid=os.getpid(), birth=identity(os.getpid()))
-                        self.store.update(run_id, pid=os.getpid(), birth=identity(os.getpid()))
+                        self.update_turn(turn_id, pid=os.getpid(), birth=process_identity(os.getpid()))
+                        self.store.update(run_id, pid=os.getpid(), birth=process_identity(os.getpid()))
                         time.sleep(0.2)
                 if cancel():
                     raise Cancelled("消息已停止")
@@ -449,7 +541,7 @@ class Conversations:
                 def observe():
                     nonlocal cursor, heartbeat
                     if time.time() - heartbeat > 1:
-                        self.update_turn(turn_id, pid=os.getpid(), birth=identity(os.getpid()))
+                        self.update_turn(turn_id, pid=os.getpid(), birth=process_identity(os.getpid()))
                         if run_id:
                             self.store.update(run_id, heartbeat=time.time())
                         heartbeat = time.time()

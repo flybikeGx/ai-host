@@ -40,6 +40,10 @@ def chat(config, monkeypatch):
     gov.add_membership(reader["id"], default["id"])
     gov.grant_role(reader["id"], reader_role["id"], domain_id=default["id"])
     users["reader"] = reader
+    viewer = gov.create_user("viewer", password=PASSWORD, home_domain_id=default["id"])
+    gov.add_membership(viewer["id"], default["id"])
+    gov.grant_role(viewer["id"], gov.store.get_role_by_name("viewer")["id"], domain_id=default["id"])
+    users["viewer"] = viewer
     multi = gov.create_user("multi", password=PASSWORD, home_domain_id=default["id"])
     for domain in (default, other):
         gov.add_membership(multi["id"], domain["id"])
@@ -59,6 +63,7 @@ def chat(config, monkeypatch):
         bob_chat=make_chat(config, "bob-chat", users["bob"]["id"], default["id"], "bob"),
         carol_chat=make_chat(config, "carol-chat", users["carol"]["id"], other["id"], "carol"),
         reader_chat=make_chat(config, "reader-chat", reader["id"], default["id"], "reader"),
+        viewer_chat=make_chat(config, "viewer-chat", viewer["id"], default["id"], "viewer"),
         multi_default_chat=make_chat(config, "multi-default-chat", multi["id"], default["id"], "multi-default"),
         multi_other_chat=make_chat(config, "multi-other-chat", multi["id"], other["id"], "multi-other"),
         orphan_chat=make_chat(config, "orphan-chat", None, default["id"], "orphan"),
@@ -246,3 +251,145 @@ def test_snapshot_files_field_collapses_without_file_read(chat):
                       params={"path": "artifacts/report.txt"}).status_code == 403
     login(client, "alice")
     assert client.get(f"/api/conversations/{chat['alice_chat']}").json()["files"]
+
+
+# ---- C4 write path -------------------------------------------------------
+
+def wait_terminal(config, turn_id, seconds=20):
+    chats = Conversations(config)
+    until = time.time() + seconds
+    while time.time() < until:
+        chats.reconcile()
+        turn = chats.turn(turn_id)
+        if turn["status"] not in {"queued", "running"}:
+            return turn
+        time.sleep(0.05)
+    raise AssertionError(chats.turn(turn_id))
+
+
+WRITE_CALLS = (
+    ("post", "/messages", {"text": "intrusion", "client_key": "intrusion"}),
+    ("post", "/stop", None),
+    ("patch", "", {"title": "intrusion"}),
+    ("patch", "", {"archived": True}),
+)
+
+
+def test_write_routes_are_owner_only_and_admin_has_no_bypass(chat, config):
+    client = chat["client"]
+    login(client, "alice")
+    for name in ("bob_chat", "carol_chat", "orphan_chat"):
+        for method, suffix, body in WRITE_CALLS:
+            response = getattr(client, method)(f"/api/conversations/{chat[name]}{suffix}", json=body)
+            assert response.status_code == 404, (name, suffix, response.text)
+            assert response.json() == {"detail": "对话不存在", "code": "conversation_not_found"}
+    assert client.get(f"/api/conversations/{chat['bob_chat']}").status_code == 404
+
+    # The owner keeps the normal lifecycle: rename, send, stop, archive/restore.
+    assert client.patch(f"/api/conversations/{chat['alice_chat']}", json={"title": "alice renamed"}).status_code == 200
+    sent = client.post(f"/api/conversations/{chat['alice_chat']}/messages",
+                       json={"text": "hello", "client_key": "owner-1"})
+    assert sent.status_code == 202
+    assert client.post(f"/api/conversations/{chat['alice_chat']}/stop").status_code == 200
+    assert wait_terminal(config, sent.json()["id"])["status"] in {"cancelled", "succeeded"}
+    assert client.patch(f"/api/conversations/{chat['alice_chat']}", json={"archived": True}).status_code == 200
+    archived = client.post(f"/api/conversations/{chat['alice_chat']}/messages",
+                           json={"text": "hello", "client_key": "owner-2"})
+    assert archived.status_code == 400 and archived.json()["code"] == "conversation_archived"
+    assert client.patch(f"/api/conversations/{chat['alice_chat']}", json={"archived": False}).status_code == 200
+
+    # A platform administrator has no write bypass; scope=all is read-only.
+    login(client, "admin", chat["admin_password"])
+    for method, suffix, body in WRITE_CALLS:
+        response = getattr(client, method)(f"/api/conversations/{chat['alice_chat']}{suffix}", json=body)
+        assert response.status_code == 404, (suffix, response.text)
+        assert response.json()["code"] == "conversation_not_found"
+    denied = client.patch(f"/api/conversations/{chat['alice_chat']}?scope=all", json={"title": "no bypass"})
+    assert denied.status_code == 403 and denied.json()["code"] == "scope_denied"
+    assert client.patch(f"/api/conversations/{chat['alice_chat']}?scope=everything",
+                        json={"title": "no bypass"}).status_code == 400
+    login(client, "alice")
+    assert client.get(f"/api/conversations/{chat['alice_chat']}").json()["conversation"]["title"] == "alice renamed"
+
+    missing = client.patch(f"/api/conversations/{MISSING}", json={"title": "x"})
+    assert missing.status_code == 404 and missing.json()["code"] == "conversation_not_found"
+
+
+def test_viewer_and_service_accounts_cannot_write(chat, config):
+    client = chat["client"]
+    login(client, "viewer")
+    for method, suffix, body in WRITE_CALLS:
+        response = getattr(client, method)(f"/api/conversations/{chat['viewer_chat']}{suffix}", json=body)
+        assert response.status_code == 403 and response.json()["code"] == "permission_denied", (suffix, response.text)
+    assert client.post("/api/conversations", json={"target": "admin", "title": "viewer"}).status_code == 403
+
+    service_token = chat["gov"].login_with_api_key(chat["users"]["service"]["api_key"])["token"]
+    headers = {"Authorization": "Bearer " + service_token}
+    assert client.post("/api/conversations", headers=headers,
+                       json={"target": "admin", "title": "service"}).status_code == 403
+    for method, suffix, body in WRITE_CALLS:
+        response = getattr(client, method)(f"/api/conversations/{chat['alice_chat']}{suffix}",
+                                          headers=headers, json=body)
+        assert response.status_code == 403, (suffix, response.text)
+        assert response.json()["code"] == "service_account_forbidden"
+
+
+def test_create_stamps_owner_and_domain_and_rejects_invisible_targets(chat, config):
+    install_agent(config, "default-agent", chat["default"]["id"], "Default Agent")
+    install_agent(config, "other-agent", chat["other"]["id"], "Other Agent")
+    install_agent(config, "off-agent", chat["default"]["id"], "Off Agent")
+    with Conversations(config).store.connection() as conn:
+        conn.execute("UPDATE repo_installations SET enabled=0 WHERE id='off-agent'")
+    client = chat["client"]
+
+    login(client, "alice")
+    created = client.post("/api/conversations", json={"target": "default-agent", "title": "alice target"})
+    assert created.status_code == 201, created.text
+    assert created.json()["owner_user_id"] == chat["users"]["alice"]["id"]
+    assert created.json()["domain_id"] == chat["default"]["id"]
+    assert "alice target" in {item["title"] for item in client.get("/api/conversations").json()}
+    invisible = client.post("/api/conversations", json={"target": "other-agent", "title": "cross domain"})
+    assert invisible.status_code == 404 and invisible.json()["code"] == "agent_not_found"
+    admin_target = client.post("/api/conversations", json={"target": "admin", "title": "not mine"})
+    assert admin_target.status_code == 404 and admin_target.json()["code"] == "agent_not_found"
+    disabled = client.post("/api/conversations", json={"target": "off-agent", "title": "stopped"})
+    assert disabled.status_code == 400 and disabled.json()["code"] == "invalid_request"
+
+    login(client, "carol")
+    other = client.post("/api/conversations", json={"target": "other-agent", "title": "carol target"})
+    assert other.status_code == 201 and other.json()["domain_id"] == chat["other"]["id"]
+    assert client.post("/api/conversations", json={"target": "default-agent", "title": "nope"}).status_code == 404
+
+    login(client, "admin", chat["admin_password"])
+    own = client.post("/api/conversations", json={"target": "admin", "title": "admin target"})
+    assert own.status_code == 201
+    assert own.json()["owner_user_id"] == chat["users"]["admin"]["id"]
+    assert own.json()["domain_id"] == chat["default"]["id"]
+
+    client.post("/api/auth/logout")
+    token_headers = {"Authorization": "Bearer " + SHARED_TOKEN}
+    bootstrap = client.post("/api/conversations", headers=token_headers, json={"target": "admin", "title": "bootstrap"})
+    assert bootstrap.status_code == 201
+    assert bootstrap.json()["owner_user_id"] == chat["users"]["admin"]["id"]
+    assert bootstrap.json()["domain_id"] == chat["default"]["id"]
+
+
+def test_repo_runs_carry_conversation_owner_and_domain(chat, config, repositories, resource_repos):
+    item = repositories.install(str(resource_repos["finance"]))
+    client = chat["client"]
+    login(client, "alice")
+    created = client.post("/api/conversations", json={"target": item["id"], "title": "repo chat"})
+    assert created.status_code == 201, created.text
+    sent = client.post(f"/api/conversations/{created.json()['id']}/messages",
+                       json={"text": "run example", "client_key": "repo-1"})
+    assert sent.status_code == 202, sent.text
+    turn = sent.json()
+    assert turn["run_id"]
+    spec = Conversations(config).store.get(turn["run_id"])["spec"]
+    assert spec["conversation_id"] == created.json()["id"]
+    assert spec["installation_id"] == item["id"]
+    assert spec["user_id"] == chat["users"]["alice"]["id"]
+    assert spec["domain_id"] == chat["default"]["id"]
+    assert spec["kind"] == "conversation"
+    client.post(f"/api/conversations/{created.json()['id']}/stop")
+    wait_terminal(config, turn["id"])

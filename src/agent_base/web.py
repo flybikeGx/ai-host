@@ -86,7 +86,8 @@ def create_app(config, *, background=True):
     scheduler = Scheduler(config)
     from .repositories import Repositories
     repositories = Repositories(config)
-    from .conversations import Conversations, ConversationBusy, ChatError, ChatForbidden, ChatInvalid
+    from .conversations import (Conversations, ConversationBusy, ChatError, ChatForbidden,
+                                ChatInvalid, ChatQuota, StreamLimiter)
     conversations = Conversations(config)
     from .identity import Identity, get_page_identity
     from .schedules import Schedules
@@ -117,6 +118,7 @@ def create_app(config, *, background=True):
         # Detached run supervisors continue; restarting HTTP does not replay them.
 
     app = FastAPI(title="Agent Base", lifespan=lifespan)
+    app.state.chat_streams = StreamLimiter(config.per_user_max_streams)
     app.state.scheduler = scheduler
     app.state.dashboard = dashboard
     from .knowledge_web import register as register_knowledge
@@ -145,7 +147,7 @@ def create_app(config, *, background=True):
 
     @app.exception_handler(ConversationBusy)
     async def conversation_busy(request, error):
-        return JSONResponse({"detail": str(error)}, status_code=409)
+        return JSONResponse({"detail": str(error), "code": "conversation_busy"}, status_code=409)
 
     @app.exception_handler(ChatError)
     async def chat_error(request, error):
@@ -163,6 +165,14 @@ def create_app(config, *, background=True):
             raise ChatForbidden("服务账号不能使用页面对话接口", code="service_account_forbidden")
         if not identity.can(permission):
             raise ChatForbidden(f"缺少权限：{permission}", code="permission_denied")
+
+    def reject_write_scope(scope: str | None) -> None:
+        # §5.1: write routes never accept scope; scope=all is a read-only bypass.
+        if scope is None:
+            return
+        if scope == "all":
+            raise ChatForbidden("写操作不接受只读范围", code="scope_denied")
+        raise ChatInvalid("写操作不接受 scope 参数", code="invalid_scope")
 
     def default_domain_id():
         from .chat_migration import default_domain
@@ -231,9 +241,12 @@ def create_app(config, *, background=True):
             scope_all_audit(identity, "/api/conversations", count=len(result), domain_id=domain_id)
         return result
 
-    @app.post("/api/conversations", dependencies=api, status_code=201)
-    def chat_create(body: ChatInput):
-        return conversations.create(**body.model_dump())
+    @app.post("/api/conversations", status_code=201)
+    def chat_create(body: ChatInput, scope: str | None = None,
+                    identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.run")
+        reject_write_scope(scope)
+        return conversations.create(identity=identity, default_domain_id=default_domain_id(), **body.model_dump())
 
     @app.get("/api/conversations/{chat_id}")
     def chat_get(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
@@ -267,17 +280,26 @@ def create_app(config, *, background=True):
         file = conversations.artifact(chat_id, path, identity, scope_all=scope_all)
         return FileResponse(file, filename=file.name, media_type="application/octet-stream")
 
-    @app.patch("/api/conversations/{chat_id}", dependencies=api)
-    def chat_update(chat_id: str, body: ChatUpdate):
-        return conversations.rename(chat_id, **body.model_dump(exclude_unset=True))
+    @app.patch("/api/conversations/{chat_id}")
+    def chat_update(chat_id: str, body: ChatUpdate, scope: str | None = None,
+                    identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.write")
+        reject_write_scope(scope)
+        return conversations.rename(chat_id, identity=identity, **body.model_dump(exclude_unset=True))
 
-    @app.post("/api/conversations/{chat_id}/messages", dependencies=api, status_code=202)
-    def chat_send(chat_id: str, body: ChatMessage):
-        return conversations.send(chat_id, body.text, body.client_key)
+    @app.post("/api/conversations/{chat_id}/messages", status_code=202)
+    def chat_send(chat_id: str, body: ChatMessage, scope: str | None = None,
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.write")
+        reject_write_scope(scope)
+        return conversations.send(chat_id, body.text, body.client_key, identity=identity)
 
-    @app.post("/api/conversations/{chat_id}/stop", dependencies=api)
-    def chat_stop(chat_id: str):
-        return conversations.cancel(chat_id)
+    @app.post("/api/conversations/{chat_id}/stop")
+    def chat_stop(chat_id: str, scope: str | None = None,
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.cancel")
+        reject_write_scope(scope)
+        return conversations.cancel(chat_id, identity=identity)
 
     @app.get("/api/conversations/{chat_id}/events")
     async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False,
@@ -292,6 +314,9 @@ def create_app(config, *, background=True):
             cursor = max(0, after, int(request.headers.get("last-event-id", "0")))
         except ValueError:
             raise HTTPException(400, "事件游标无效")
+        stream_key = identity.user_id or "anonymous"
+        if not app.state.chat_streams.acquire(stream_key):
+            raise ChatQuota("同时打开的对话流已达上限", code="user_stream_quota")
 
         def revoked() -> bool:
             # §6.3: once the stream is open, a disabled user / removed domain /
@@ -307,30 +332,33 @@ def create_app(config, *, background=True):
 
         async def stream():
             nonlocal cursor
-            idle = 0
-            checked = time.monotonic()
-            while not await request.is_disconnected():
-                if time.monotonic() - checked >= 2:
-                    checked = time.monotonic()
-                    if await asyncio.to_thread(revoked):
-                        yield 'event: error\ndata: {"code": "unauthorized"}\n\n'
-                        return
-                batch = await asyncio.to_thread(conversations.events, chat_id, cursor, identity, scope_all=scope_all)
-                for event in batch:
-                    cursor = event["seq"]
-                    yield f"id: {cursor}\nevent: update\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if once:
-                    if len(batch) == 200:
-                        continue
-                    break
-                if not batch:
-                    idle += 1
-                    if idle % 40 == 0:
-                        await asyncio.to_thread(conversations.reconcile)
-                        yield ": keepalive\n\n"
-                    await asyncio.sleep(0.25)
-                else:
-                    idle = 0
+            try:
+                idle = 0
+                checked = time.monotonic()
+                while not await request.is_disconnected():
+                    if time.monotonic() - checked >= 2:
+                        checked = time.monotonic()
+                        if await asyncio.to_thread(revoked):
+                            yield 'event: error\ndata: {"code": "unauthorized"}\n\n'
+                            return
+                    batch = await asyncio.to_thread(conversations.events, chat_id, cursor, identity, scope_all=scope_all)
+                    for event in batch:
+                        cursor = event["seq"]
+                        yield f"id: {cursor}\nevent: update\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if once:
+                        if len(batch) == 200:
+                            continue
+                        break
+                    if not batch:
+                        idle += 1
+                        if idle % 40 == 0:
+                            await asyncio.to_thread(conversations.reconcile)
+                            yield ": keepalive\n\n"
+                        await asyncio.sleep(0.25)
+                    else:
+                        idle = 0
+            finally:
+                app.state.chat_streams.release(stream_key)
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.get("/api/repos", dependencies=api)

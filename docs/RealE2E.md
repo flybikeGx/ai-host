@@ -94,7 +94,18 @@ NULL owner 对普通用户与默认管理员读 404、`file.read` 缺失时 snap
 service 账号读接口 403，以及打开中的 SSE 在账号停用后 30 秒内收到
 `event: error` + `{"code":"unauthorized"}` 并关闭。
 
-阶段限制（C4 落地后移除）：C3 按任务边界不修改 create，因此新建会话仍是
-`owner_user_id IS NULL`。`auth.spec.js` 在创建后调用 `backfillOwners()`，按 C2 迁移的
-回填规则（bootstrap admin + default 域）补齐归属，再验证发送/SSE/历史；这不代表
-C4 的创建授权已实现，contracts 中的跨域写、管理员写旁路与每用户配额仍为失败。
+C3 阶段的临时 `backfillOwners()` 已在 C4 移除：新建会话现在由 `create` 写入
+`owner_user_id` / `domain_id`，发送、SSE 与历史测试直接使用创建结果，不再手工修补归属。
+
+## AIHO-17 C4 写路径门禁（2026-11-20）
+
+C4 实现后，写路径契约从 `contracts` 迁入必须通过集合：`scripts/test_real_e2e.py`
+默认同时运行 `auth`、`chat_authz` 与 `chat_write`，`--contracts` 只保留 C5–C6。
+`tests/e2e/chat_write.spec.js` 在真实进程上覆盖：跨域 send/stop/rename/archive 全 404
+且与缺失对象同文案、平台管理员对他人会话写 404 且 `scope=all` 写 403、service 账号
+（即使持有 platform_admin 角色）写 403、viewer 写 403、owner 正常改名/归档/恢复/发送/停止、
+创建时写入 owner/domain 且不可见目标 404、每用户第 9 个活跃轮次 429 `user_turn_quota`、
+第 5 条并发 SSE 429 `user_stream_quota`。
+
+仍独立报告为失败：C5 send/stop 的 `trace_id` 审计、C6 前端门控。配额计数为单进程实现，
+`agent-base serve` 当前按单进程部署；多 worker/多进程共享计数不在本期，留给 C7 文档说明。

@@ -121,6 +121,8 @@ class Config:
     guardian: dict = field(default_factory=dict)
     oss: dict = field(default_factory=dict)
     web: dict = field(default_factory=dict)
+    per_user_max_turns: int = 8
+    per_user_max_streams: int = 4
 
     def web_auth_mode(self) -> str:
         mode = os.environ.get("AGENT_BASE_WEB_AUTH", self.web.get("auth", "hybrid"))
@@ -160,7 +162,25 @@ class Config:
             raise ValueError("web 必须是表")
         result = cls(path, data, runtime, cap, guardian, oss=oss, web=web)
         result.web_auth_mode()
+        result.per_user_max_turns = _web_limit(
+            os.environ.get("AGENT_BASE_WEB_PER_USER_TURNS", web.get("per_user_max_turns", 8)),
+            "web.per_user_max_turns")
+        result.per_user_max_streams = _web_limit(
+            os.environ.get("AGENT_BASE_WEB_PER_USER_STREAMS", web.get("per_user_max_streams", 4)),
+            "web.per_user_max_streams")
         return result
+
+
+def _web_limit(value, label: str) -> int:
+    """§9/§12: per-user limits are integers in 1–32; zero never means unlimited."""
+    if isinstance(value, str):
+        try:
+            value = int(value.strip())
+        except ValueError:
+            raise ValueError(f"{label} 必须是 1–32 的整数") from None
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 32:
+        raise ValueError(f"{label} 必须是 1–32 的整数")
+    return value
 
 
 def _parse_guardian(raw) -> dict:
