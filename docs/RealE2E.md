@@ -100,12 +100,26 @@ C3 阶段的临时 `backfillOwners()` 已在 C4 移除：新建会话现在由 `
 ## AIHO-17 C4 写路径门禁（2026-11-20）
 
 C4 实现后，写路径契约从 `contracts` 迁入必须通过集合：`scripts/test_real_e2e.py`
-默认同时运行 `auth`、`chat_authz` 与 `chat_write`，`--contracts` 只保留 C5–C6。
+默认同时运行 `auth`、`chat_authz` 与 `chat_write`，`--contracts` 只保留 C5–C6（C5 于 AIHO-18 迁出，见下节）。
 `tests/e2e/chat_write.spec.js` 在真实进程上覆盖：跨域 send/stop/rename/archive 全 404
 且与缺失对象同文案、平台管理员对他人会话写 404 且 `scope=all` 写 403、service 账号
 （即使持有 platform_admin 角色）写 403、viewer 写 403、owner 正常改名/归档/恢复/发送/停止、
 创建时写入 owner/domain 且不可见目标 404、每用户第 9 个活跃轮次 429 `user_turn_quota`、
 第 5 条并发 SSE 429 `user_stream_quota`。
 
-仍独立报告为失败：C5 send/stop 的 `trace_id` 审计、C6 前端门控。配额计数为单进程实现，
+C5 send/stop 的 `trace_id` 审计已在 AIHO-18 落地（见下节）；C6 前端门控仍独立报告为失败。配额计数为单进程实现，
 `agent-base serve` 当前按单进程部署；多 worker/多进程共享计数不在本期，留给 C7 文档说明。
+
+## AIHO-18 C5 审计门禁（2026-11-20）
+
+C5 实现后，审计契约从 `contracts` 迁入必须通过集合：`scripts/test_real_e2e.py`
+默认同时运行 `auth`、`chat_authz`、`chat_write` 与 `chat_audit`，`--contracts`
+只保留 C6。`tests/e2e/chat_audit.spec.js` 在真实进程上覆盖：登录后创建会话、
+发送 `FIXTURE_SLEEP`、停止，再按 `?trace_id=<turn_id>` 查询 `/api/v1/audit`，
+必须同时看到 `chat.send` 与 `chat.stop` 且响应不含消息正文。
+
+单元层 `tests/test_chat_audit.py` 覆盖 8 个冻结动作（6 个业务动作、
+`chat.scope_all`、`chat.migrate`）的 `level`/`user_id`/`domain_id`/`trace_id`/`detail`
+形状、`?trace_id=` 与 `?user_id=` 查询、正文/标题/产物/凭据不入库，以及
+审计写入被真实 SQLite trigger 拒绝时创建、发送、停止、下载与 `scope=all` 读取仍成功
+并记录本地错误日志。C6 前端门控不在本阶段范围内，继续由 `--contracts` 单独报告失败。

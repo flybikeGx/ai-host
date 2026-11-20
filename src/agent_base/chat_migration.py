@@ -7,12 +7,10 @@ this migration operates on all rows without user filtering.
 """
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-import time
-import uuid
 
+from .chat_audit import insert as audit_insert
 from .repositories import installation_lock
 
 log = logging.getLogger(__name__)
@@ -69,10 +67,8 @@ def migrate_chat(store, control):
                 counts[key] = (conn.execute(f"UPDATE {table} SET {column}=? WHERE {column} IS NULL",
                                            (value,)).rowcount if value is not None else 0)
             if sum(counts.values()):
-                conn.execute(
-                    "INSERT INTO control.audit_log(id,domain_id,user_id,trace_id,level,action,detail,at) "
-                    "VALUES(?,?,?,NULL,'chat','chat.migrate',?,?)",
-                    (uuid.uuid4().hex, domain_id, None,
-                     json.dumps({**counts, "bootstrap_admin_id": admin_id, "default_domain_id": domain_id}),
-                     time.time()))
+                audit_insert(
+                    conn, action="chat.migrate", domain_id=domain_id, user_id=None,
+                    trace_id=None, table="control.audit_log",
+                    detail={**counts, "bootstrap_admin_id": admin_id, "default_domain_id": domain_id})
             return counts

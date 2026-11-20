@@ -19,6 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .mcp_server import public
 from .scheduler import Scheduler
+from . import chat_audit
 
 
 class WorkInput(BaseModel):
@@ -182,10 +183,12 @@ def create_app(config, *, background=True):
 
     def scope_all_audit(identity: Identity, path: str, *, conversation_id=None, count=None, domain_id=None):
         # §10: every platform-admin scope=all read leaves one attributed audit row.
-        app.state.governance.store.audit(
-            domain_id=domain_id, user_id=identity.user_id, trace_id=None, level="chat",
-            action="chat.scope_all",
-            detail={"path": path, "conversation_id": conversation_id, "count": count, "mode": identity.mode})
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.scope_all", domain_id=domain_id,
+            detail={"path": path, "conversation_id": conversation_id, "count": count})
+
+    def chat_domain(chat_id: str):
+        return conversations.get(chat_id).get("domain_id")
 
     def authorize(request: Request, authorization: str | None = Header(default=None)):
         if app.state.identity_resolver.mode == "jwt" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
@@ -246,7 +249,16 @@ def create_app(config, *, background=True):
                     identity: Identity = Depends(get_page_identity)):
         require_chat(identity, "agent.run")
         reject_write_scope(scope)
-        return conversations.create(identity=identity, default_domain_id=default_domain_id(), **body.model_dump())
+        result = conversations.create(identity=identity, default_domain_id=default_domain_id(),
+                                      **body.model_dump())
+        runtime = result["spec"]["runtime"]
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.create", domain_id=result.get("domain_id"),
+            detail={"conversation_id": result["id"], "target": result["target"],
+                    "target_kind": "admin" if result["target"] == "admin" else "repo",
+                    "title_auto": bool(result["spec"].get("auto_title")),
+                    "model": runtime.get("model"), "effort": runtime.get("effort")})
+        return result
 
     @app.get("/api/conversations/{chat_id}")
     def chat_get(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
@@ -278,6 +290,9 @@ def create_app(config, *, background=True):
             scope_all_audit(identity, "/api/conversations/{id}/download", conversation_id=chat_id,
                             domain_id=row.get("domain_id"))
         file = conversations.artifact(chat_id, path, identity, scope_all=scope_all)
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.download", domain_id=row.get("domain_id"),
+            detail={"conversation_id": chat_id, "path": path, "size": file.stat().st_size})
         return FileResponse(file, filename=file.name, media_type="application/octet-stream")
 
     @app.patch("/api/conversations/{chat_id}")
@@ -285,21 +300,46 @@ def create_app(config, *, background=True):
                     identity: Identity = Depends(get_page_identity)):
         require_chat(identity, "task.write")
         reject_write_scope(scope)
-        return conversations.rename(chat_id, identity=identity, **body.model_dump(exclude_unset=True))
+        changes = body.model_dump(exclude_unset=True)
+        result = conversations.rename(chat_id, identity=identity, **changes)
+        # §10: titles are never recorded, only which fields changed.
+        if "title" in changes:
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.rename",
+                domain_id=result.get("domain_id"),
+                detail={"conversation_id": chat_id, "fields": ["title"]})
+        if "archived" in changes:
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.archive",
+                domain_id=result.get("domain_id"),
+                detail={"conversation_id": chat_id, "archived": bool(changes["archived"])})
+        return result
 
     @app.post("/api/conversations/{chat_id}/messages", status_code=202)
     def chat_send(chat_id: str, body: ChatMessage, scope: str | None = None,
                   identity: Identity = Depends(get_page_identity)):
         require_chat(identity, "task.write")
         reject_write_scope(scope)
-        return conversations.send(chat_id, body.text, body.client_key, identity=identity)
+        result = conversations.send(chat_id, body.text, body.client_key, identity=identity)
+        if not result.get("duplicate"):
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.send",
+                domain_id=chat_domain(chat_id), trace_id=result["id"],
+                detail={"conversation_id": chat_id, "turn_id": result["id"]})
+        return result
 
     @app.post("/api/conversations/{chat_id}/stop")
     def chat_stop(chat_id: str, scope: str | None = None,
                   identity: Identity = Depends(get_page_identity)):
         require_chat(identity, "agent.cancel")
         reject_write_scope(scope)
-        return conversations.cancel(chat_id, identity=identity)
+        result = conversations.cancel(chat_id, identity=identity)
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.stop",
+            domain_id=chat_domain(chat_id), trace_id=result.get("turn_id"),
+            detail={"conversation_id": chat_id, "turn_id": result.get("turn_id"),
+                    "requested": bool(result.get("requested"))})
+        return result
 
     @app.get("/api/conversations/{chat_id}/events")
     async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False,
