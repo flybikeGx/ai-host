@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 
 test('connection token remains active when moving from chat to schedules',async({page})=>{
-  await page.route('**/api/**',route=>route.request().headers().authorization==='Bearer fixture-ui-token'?route.continue():route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({detail:'需要 Bearer token'})}));
+  await page.route('**/api/**',route=>new URL(route.request().url()).pathname==='/api/auth/session'||route.request().headers().authorization==='Bearer fixture-ui-token'?route.continue():route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({detail:'需要 Bearer token'})}));
   await page.goto('/chat');
   await expect(page.getByRole('heading',{name:'连接本地服务'})).toBeVisible();
   await page.getByLabel('管理 Token',{exact:true}).fill('fixture-ui-token');
