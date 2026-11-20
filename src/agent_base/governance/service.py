@@ -70,7 +70,7 @@ class Governance:
                 fields.update(status="locked", locked_until=time.time() + 300)
             self.store.update_user(user["id"], **fields)
             raise ValueError("用户名或密码错误")
-        self.store.update_user(user["id"], failed_count=0, locked_until=0)
+        self.store.update_user(user["id"], failed_count=0, locked_until=0, status="active")
         return self._issue_session(user)
 
     def login_with_api_key(self, key: str) -> dict:

@@ -1,4 +1,4 @@
-"""治理面 HTTP API：``/api/v1`` 前缀，JWT Bearer 鉴权 + 权限校验。
+"""治理面 HTTP API：``/api/v1``，签名 Bearer 或同源浏览器会话 + 权限校验。
 
 独立于既有单用户 ``/api/*``（后者仍用 AGENT_BASE_WEB_TOKEN 的 Bearer token）。
 本模块只挂路由，不新建 FastAPI 实例；鉴权为签名的 ``control.secret`` JWT，权限以
@@ -119,7 +119,12 @@ def register(app: FastAPI, config):
     app.state.gateway = gateway
     gov.bootstrap()
 
-    def current_user(authorization: str | None = Header(default=None)) -> dict:
+    def current_user(request: Request, authorization: str | None = Header(default=None)) -> dict:
+        if not authorization:
+            browser = getattr(app.state, "browser_auth", None)
+            identity = browser.identity(request) if browser else None
+            if identity:
+                return identity
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(401, "需要 Bearer token")
         try:
