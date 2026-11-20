@@ -357,3 +357,14 @@ Web 已登记 finance-demo、inventory-demo、research-demo 三个工作，并�
 - 不可信仓库的操作系统隔离、多租户部署、跨机器恢复。
 
 固定版本 dsh 的 final 事件不含 reason；系统明确记录 legacy_final_exit_code，不声称拿到了不存在的原生字段。原生 MCP 插件可能按可选插件处理启动失败，收据不能替代外部 MCP 上线验收。
+
+## 2026-11-19 账号登录页与浏览器会话
+
+交付 `/login`（已有账号登录，无注册入口）、HttpOnly 会话、刷新/导航恢复、服务端退出和 20 分钟过期处理。治理账号存在后旧工作台仅允许完整全局管理员会话或原管理 Token；普通用户登录后只看到本人账号页。OSS 仍只支持上游 token 身份回查，浏览器 SSO 跳转/回调与企业统一退出未接入，页面按实际能力展示。
+
+- Python 全项目：`uv run --frozen pytest -q tests`，**275 passed**，1 个既有 Starlette/httpx 弃用提示，225.22 秒。新增 7 项覆盖登录/恢复、Cookie 属性、退出后旧 Cookie 拒绝、过期/停用、普通用户与减权、旧 Token 兼容、跨 Origin 登录拒绝及锁定到期恢复。
+- 账号/治理/OSS 定向回归：**35 passed**，3.15 秒。
+- Playwright 全量：**23 passed**，42.6 秒；新增 4 项涵盖错误口令、原页面/旧工作台回跳、刷新保留、退出、普通用户隔离、过期、外部 return URL 拒绝、密码显隐和手机布局。两个旧 Token 拦截测试排除了新的公开会话查询接口，原 Token 导航断言保留。
+- `npm run build`、`git diff --check` 通过；生产静态文件已更新。桌面/手机截图已目视检查。
+
+全部测试使用隔离目录、虚构账号与本机模拟服务，未读取或创建现有业务账号/企业登录态，没有执行真实付费模型调用。未重启已有业务 Web/cron/MCP。日志、JUnit、源码摘要与截图保存在本机忽略目录 `.agent-base/validations/login-20261119/`。企业 SSO 跳转协议与真实身份提供方仍待后续接入验证。

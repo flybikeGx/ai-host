@@ -83,6 +83,37 @@ try:
     ServiceCatalog(config).bind(agent_id=ui_agent["id"], deployment_id="ticket-ui", alias="tickets",
                                 tools=["ticket_search"])
     app = create_app(config)
+    @app.post('/fixture/auth/setup')
+    def setup_browser_auth():
+        gov = app.state.governance
+        gov.bootstrap(admin_password='fixture-browser-password')
+        if gov.store.get_user_by_username('member') is None:
+            gov.create_user('member', password='fixture-member-password', display_name='测试成员')
+        return {'ready': True}
+
+    @app.post('/fixture/auth/reset')
+    def reset_browser_auth():
+        # Only this isolated browser fixture owns these accounts and sessions.
+        with app.state.governance.store.connection() as conn:
+            conn.execute('DELETE FROM browser_sessions')
+            conn.execute('DELETE FROM user_roles')
+            conn.execute('DELETE FROM user_permissions')
+            conn.execute('DELETE FROM user_domains')
+            conn.execute('DELETE FROM users')
+        return {'reset': True}
+
+    @app.post('/fixture/auth/expire')
+    def expire_browser_auth():
+        with app.state.governance.store.connection() as conn:
+            conn.execute('UPDATE browser_sessions SET expires=?', (time.time()-1,))
+        return {'expired': True}
+
+    @app.post('/fixture/auth/shared-token')
+    def shared_token(body: dict | None = None):
+        # Test-only switch for the hybrid `AGENT_BASE_WEB_TOKEN` bootstrap entry.
+        # This fixture never receives the real environment token.
+        app.state.identity_resolver.shared_token = (body or {}).get('token') or None
+        return {'shared_token': bool(app.state.identity_resolver.shared_token)}
     from agent_base.knowledge import Knowledge
     from fastapi.responses import JSONResponse
     knowledge = Knowledge(config)

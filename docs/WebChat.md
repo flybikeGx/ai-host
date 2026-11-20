@@ -96,9 +96,78 @@ repo skills 不重新安装，MCP 不随每轮启动或退出；对话超时、�
 
 同一 client_key 重试返回原轮次；同 key 不同文本报错。新 key 遇到当前对话仍忙返回 409，前端等待结束或停止后再发。重新订阅 SSE 只读已有事件，不产生模型请求。浏览器使用 fetch 读取 SSE，因此管理 Token 可以放在 Authorization header，不进入 URL。
 
-消息与 API 使用原有 Bearer 认证、Host 和跨 Origin 写请求限制。若配置 AGENT_BASE_WEB_TOKEN，在对话台“连接设置”填写；Token 只保存在当前页面内存，不写入 localStorage。当前仍是本机可信用户管理界面，没有增加多用户账号系统。
+消息与 API 保留 Host、跨 Origin 写请求限制和原管理 Bearer 认证；账号登录后也可以使用同源浏览器会话，无需反复填写 Token。原“连接设置”继续支持已配置的 `AGENT_BASE_WEB_TOKEN`，只保存在页面内存。
+
+## 账号登录与会话
+
+访问 `/login`，使用管理员已经分配的账号和密码登录；页面没有注册入口。登录成功后回到原来的页面，刷新、导航、SSE 和下载沿用同一个会话；侧栏显示当前用户并提供退出。账号未获全局管理权限时只展示本人账号信息，不挂载全局工作台。
+
+尚无账号时，由管理员在本机运行 `agent-base control init` 初始化管理员；此命令仅首次创建时在管理员自己的终端输出初始密码，登录页不提供默认密码或自动创建管理员。也可通过已有 `AGENT_BASE_ADMIN_PASSWORD` 启动引导。其他账号仍由有权管理员通过治理接口创建。
+
+浏览器 Cookie 为 HttpOnly、SameSite=Lax，HTTPS 下带 Secure；会话随机值只以哈希存入 `control.sqlite.browser_sessions`。会话有效期为 20 分钟，无静默刷新；到期返回登录页。退出会删除服务端会话，复制的旧 Cookie 也不可继续使用；不把密码、平台令牌或管理 Token 写入 localStorage/sessionStorage。
+
+没有治理账号时保留原本机工作台行为。一旦存在治理账号，匿名调用旧工作台 API 被拒绝；仅具备全部全局管理权限的用户可访问，原显式管理 Bearer token 保持兼容。账号停用或权限减少影响后续请求。此过渡接入不代表旧工作台已经具备按用户/域隔离的数据模型。
+
+当前企业 OSS 后端支持“已有 OSS token → 回查工号 → 映射平台账号”，还没有浏览器 SSO 跳转、回调及统一退出流程。登录页展示该能力状态，不要求用户粘贴 OSS token，也不伪造企业登录按钮。浏览器退出只撤销当前平台会话，不注销企业身份提供方会话或既有治理 API 令牌。
+
+浏览器接口：`GET /api/auth/session` 查询身份与能力，`POST /api/auth/login` 账号登录，`POST /api/auth/logout` 服务端退出；响应禁用缓存。原 `/api/v1/auth/login`、`auth/api-key` 和 `auth/oss` 保持现有契约。
+
+## 多用户权限与隔离
+
+chat 页面与 `/api/chat/*`、`/api/conversations*` 已接入治理层用户体系。以下行为是冻结契约的实现，权限表、错误码判定顺序、域规则与迁移 DDL 见 [CHAT_MULTIUSER_DESIGN.md](CHAT_MULTIUSER_DESIGN.md)。
+
+### 身份与域
+
+- 页面身份来自同源 HttpOnly Cookie，或显式 `Authorization: Bearer <治理令牌>`；两者都按用户 id 重新读取账号状态，停用/锁定用户的下一次请求即 401（`user_disabled`）。
+- `AGENT_BASE_WEB_TOKEN` 仅在本机 `hybrid` 模式映射为引导身份（BOOTSTRAP，最早创建的 active 平台管理员）；`jwt` 模式下共享 token 一律 401。没有任何治理账号时保留本机匿名引导。
+- `user_type='service'` 的服务账号在 chat 页面面一律 403（`service_account_forbidden`），即使其角色包含相应权限。
+- 顶部域下拉的选项来自 `GET /api/v1/me` 的 `domains[]`；选中值写 `sessionStorage` 并作为 `x-domain-id` 发送。该 header 只是选择器：服务端每次都校验 membership 与域状态，不接受前端推断。域不存在/未加入返回 403 `domain_forbidden`，多域用户未选择返回 400 `domain_required`，前端清空选择并重读 `/me`。
+
+### 可见范围
+
+- Agent 列表只返回当前域内 `status=ready` 的安装版本；Admin Agent 只对平台管理员出现，其他角色的列表里完全没有它。
+- 会话列表默认只返回本人的会话（200 条/人），可跨本人已加入的域；`domain_id` 参数只能在本人的可域内取值。
+- 按 id 访问会话、事件流、产物清单、下载，以及发消息、停止、改名、归档，全部经过同一归属校验：不存在、非本人、对象域不可见、以及 `owner_user_id IS NULL` 的存量会话，对普通用户一律 404（文案统一「对话不存在」，不泄露对象是否存在）。
+- **NULL owner 语义（已决）**：迁移时没有 bootstrap admin 的存量会话保持 `owner_user_id IS NULL`。该状态对所有人都是 404，包括平台管理员的 `scope=all` 只读旁路；不做额外回填（glisxx 2026-11-20 选 A，采用 §5.3 冻结代码的顺序，详见设计文档 §16.4）。`domain_id IS NULL` 视为 `default` 域，读路径不依赖 NULL。
+
+### 角色可见行为
+
+| 行为 | viewer | developer / domain_admin | platform_admin | service 账号 |
+| --- | --- | --- | --- | --- |
+| 查看 Agent 列表、本域 | 可用 | 可用 | 可用（含 Admin Agent） | 403 |
+| 查看/下载本人会话与产物 | 可用（有 `file.read` 时显示产物） | 可用 | 可用 | 403 |
+| 新建对话、发消息、停止、改名/归档 | 403，按钮隐藏、输入框只读 | 可用 | 可用 | 403 |
+| 只读查看他人会话（`scope=all`） | 403 | 403 | 可用，只读，每次落 `chat.scope_all` 审计 | 403 |
+| 写他人会话 | 404 | 404 | 404（无写旁路） | 403 |
+
+- 前端只按 `/me` 的 `domains[].permissions` 与 `platform_admin` 显隐入口，并在服务端拒绝时按 §6.4 处理；不缓存权限、不据角色自行推断。
+- `scope=all` 只接受 `own` / `all` 两个值（其他值 400）；只用于列表与 4 条读路由，写路由不接受 `scope`，管理员对他人会话的写操作与缺失对象同为 404。
+- `snapshot` 的 `files` 字段只在身份具备 `file.read` 时返回内容，否则为空数组。
+
+### 并发、SSE 与审计
+
+- 每用户默认 8 个活跃轮次（`web.per_user_max_turns`，1–32）与 4 条 SSE 连接（`web.per_user_max_streams`，1–32）；超限 429（`user_turn_quota` / `user_stream_quota`）。全局 32 轮仍是 409 `conversation_busy` 兜底，单会话同时 1 轮。检查与插入在同一 `BEGIN IMMEDIATE` 事务内。
+- 流打开时的认证/权限/归属失败返回普通 401/403/404，不建立流；流建立后账号停用或权限被撤销，服务端在 30 秒内发送 `event: error` 与 `{"code":"unauthorized"}` 并关闭，不携带堆栈、路径或 token。
+- 8 个 `chat.*` 审计动作（`chat.create` / `chat.send` / `chat.stop` / `chat.rename` / `chat.archive` / `chat.download` / `chat.scope_all` / `chat.migrate`）写入 `audit_log`，`level="chat"`，`trace_id` 对 send/stop 为本轮 `turn_id`；`detail` 不含消息正文、标题值、工具入参/结果、产物内容、token。`GET /api/v1/audit?trace_id=<turn_id>` 可串起同一轮的发送与停止，`?user_id=` 可列某人的 chat 动作。审计写失败只记录本地错误日志，不影响主流程。
+
+### 错误码与前端动作
+
+`{"detail": "<中文消息>", "code": "<稳定码>"}`：401 回登录（区分 `token_missing` / `token_invalid` / `token_expired` / `user_disabled`）；403 显示「无权限」并隐藏入口（`permission_denied` / `domain_forbidden` / `scope_denied` / `service_account_forbidden`）；404 视为已删除，从列表移除（`conversation_not_found` / `agent_not_found` / `artifact_not_found`）；409 提示当前轮次进行中并保留输入；429 提示达到个人上限并冷却；400 就地展示 `detail`；422 显示「请求格式不正确」。
+
+## 部署前提
+
+- 服务默认绑定 loopback，`TrustedHostMiddleware` 只接受 `localhost` / `127.0.0.1` / `[::1]` / `testserver`。这是安全边界，**不得为了「先能用」放宽 Host 校验**。
+- 让其他主机的浏览器访问需要在自己前面加反向代理，并由代理终止 HTTPS：把请求转发到 `127.0.0.1` 上的服务，保持 `Host` 为上面允许的值（或在自己维护的代理配置里显式改 `allowed_hosts`），Cookie 的 `Secure` 依赖 HTTPS。浏览器到代理之间必须使用 HTTPS，否则会话 Cookie 等于明文传输。
+- 反向代理不得把 `X-Forwarded-For` 当作身份来源；本机引导判定只看真实客户端地址，不信任转发头。
+
+## 过渡限制
+
+- 每用户 SSE 连接计数在进程内实现。`agent-base serve` 当前按**单进程**部署；多 worker / 多进程部署会各自计数，不能作为全局配额，本期不支持。
+- 浏览器 Cookie 会话是 20 分钟**绝对到期**，没有滑动续期；到期必须重新登录。Bearer 客户端可调用 `POST /api/v1/auth/refresh` 换新令牌（无状态、不做过期宽限），持续活跃可一直续期，因此**没有绝对会话时长上限**。这两条是 C1 已明确、C7 记录的过渡限制。
+- 单文件下载上限沿用 64 MiB；列表每用户 200 条。
 
 ## 前端构建与测试
+
 
 生产静态文件已经构建到 Python 包的 static/chat 中，运行时不访问 CDN。复制项目后直接启动 serve 即可。
 
@@ -115,7 +184,10 @@ Python 测试在项目目录执行：
 .venv/bin/pytest -q
 ```
 
-浏览器测试在 frontend 目录执行 `npx playwright test`。macOS 优先使用已安装 Google Chrome；其他机器需要先 `npx playwright install chromium`。测试启动独立端口 8879，使用专用状态目录和 fake CLI，不调用模型，也不停止真实 repo 服务。
+浏览器测试在 frontend 目录执行 `npx playwright test`，共 31 条（登录、权限显隐、域选择、聊天、仪表盘、知识库、服务、定时页）。该套件已纳入默认门禁：`python3 scripts/ci.py full` 在构建后运行 `browser-ui` 阶段执行它，不再需要手工单独跑。macOS 优先使用已安装 Google Chrome；其他机器需要先 `npx playwright install chromium`。测试启动独立端口 8879，使用专用状态目录和 fake CLI，不调用模型，也不停止真实 repo 服务。
+
+真实进程 E2E（`tests/e2e/*.spec.js`，登录、隔离、配额、审计、前端门控）由 `full` 的 `real-e2e` 阶段执行。`python3 scripts/ci.py contracts` 现在只做**必过集覆盖断言**：确认 §14 的 C1–C7 每条契约仍有具名测试、且这些套件仍被 `full` 执行；空套件或改名会直接失败，不再单独运行一套「未实现契约」。详见 [LocalCI.md](LocalCI.md)。
+
 
 真实验收在已有模型凭据、三个示例 repo 及运行中的 serve 环境执行：
 

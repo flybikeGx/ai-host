@@ -70,7 +70,7 @@ class Governance:
                 fields.update(status="locked", locked_until=time.time() + 300)
             self.store.update_user(user["id"], **fields)
             raise ValueError("用户名或密码错误")
-        self.store.update_user(user["id"], failed_count=0, locked_until=0)
+        self.store.update_user(user["id"], failed_count=0, locked_until=0, status="active")
         return self._issue_session(user)
 
     def login_with_api_key(self, key: str) -> dict:
@@ -123,12 +123,13 @@ class Governance:
         self.store.add_membership(user["id"], domain_id)
         return user
 
-    def _issue_session(self, user: dict) -> dict:
+    def _issue_session(self, user: dict, *, ttl: int | None = None) -> dict:
         payload = {
             "sub": user["id"], "username": user["username"], "user_type": user["user_type"],
             "home_domain_id": user["home_domain_id"], "jti": uuid.uuid4().hex,
         }
-        ttl = 1200 if user["user_type"] == "person" else 86400 * 30
+        if ttl is None:
+            ttl = 1200 if user["user_type"] == "person" else 86400 * 30
         token = auth.issue_token(payload, self._secret, ttl=ttl)
         return {"token": token, "expires_in": ttl, "user": _public_user(user)}
 

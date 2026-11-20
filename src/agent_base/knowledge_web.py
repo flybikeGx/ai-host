@@ -35,11 +35,16 @@ def register(app,config):
 
     def administrator(request:Request):
         if secrets.compare_digest(request.headers.get('authorization',''),'Bearer '+secret):return True
+        browser=getattr(app.state,'browser_auth',None)
+        if browser and (browser.required() or request.cookies.get('agent_base_session')):
+            browser.require_workspace(request)
+            return True
         try:store.grant(request.cookies.get('kb_admin',''),'admin');return True
         except KnowledgeError:raise KnowledgeError('请使用 agent-base open 建立本机管理连接，或在连接设置中填写已配置的管理 Token',401)
 
     def reader(request:Request):
-        if os.environ.get('AGENT_BASE_WEB_TOKEN'):administrator(request)
+        browser=getattr(app.state,'browser_auth',None)
+        if os.environ.get('AGENT_BASE_WEB_TOKEN') or (browser and (browser.required() or request.cookies.get('agent_base_session'))):administrator(request)
 
     @app.post('/api/knowledge/connect')
     def connect(body:dict=Body(...)):

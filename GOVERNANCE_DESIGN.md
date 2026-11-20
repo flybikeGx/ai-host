@@ -361,6 +361,55 @@ flowchart TB
 
 ---
 
+## 12. 已实现接缝（as-built，2026-11-20）：`/me` 域权限、refresh 与 chat 审计
+
+本节记录治理层已经落地、并被 chat 页面消费的真实契约；冻结文本与判定顺序以 [docs/CHAT_MULTIUSER_DESIGN.md](docs/CHAT_MULTIUSER_DESIGN.md) 为准，本节不改变 P1–P4 的阶段计划。
+
+### 12.1 `/api/v1/me`（只做加法）
+
+- 既有 `roles` / `effective_permissions` 保留；新增 `platform_admin`、`home_domain_id`、`domains[]`。
+- `domains[]` 的每一项含该域 id/code/name 与**排序后的 `permissions`**，权限按「当前域成员身份 + 内置角色/直授」求值；`platform_admin` 的域集合是全部启用域。
+- 停用/锁定用户的请求直接 401（`user_disabled`），不返回旧快照；前端不缓存权限，每次请求都由服务端重新校验。
+
+### 12.2 `POST /api/v1/auth/refresh`
+
+- 无请求体，仅接受 Bearer 令牌（浏览器 Cookie 会话不走该端点，见 §12.3）。
+- 验旧换新：重新签发 `iat` / `exp` / `jti`，按 `sub` 重读用户状态；停用用户拒绝，失败一律 401，不做过期宽限。
+- 令牌只承载身份，不承载权限；换新后权限仍按数据库实时求值。
+
+### 12.3 身份传输与域选择
+
+- 浏览器使用 HttpOnly、SameSite=Lax 的 `agent_base_session` Cookie（库里只存哈希，20 分钟绝对到期）；治理 Bearer 与 Cookie 走同一套用户状态复查。
+- 页面面 `x-domain-id` 是**选择器**，服务端每次校验 membership；`/api/v1` 无该 header 时保留既有全局语义（`current_domain=None`）。
+- `hybrid` 模式的本机引导映射为 BOOTSTRAP（最早创建的 active 平台管理员）；`jwt` 模式拒绝共享 token（fail-closed）；`user_type='service'` 在 chat 页面面一律 403。
+
+### 12.4 chat 审计动作
+
+每个 chat 动作写 `audit_log`，`level="chat"`，`user_id` 取身份用户（匿名引导为 `null` 并在 `detail.mode` 标注 `token`/`bootstrap`），`domain_id` 取会话域（`chat.migrate` 取默认域）：
+
+| 动作 | 触发 | `trace_id` | `detail` |
+| --- | --- | --- | --- |
+| `chat.create` | 新建会话成功 | `null` | conversation_id、target、target_kind、title_auto、model、effort |
+| `chat.send` | 消息受理成功 | `turn_id` | conversation_id、turn_id |
+| `chat.stop` | 停止请求 | 当前活跃 `turn_id` | conversation_id、turn_id、requested |
+| `chat.rename` | 改名成功 | `null` | conversation_id、fields（只记字段名） |
+| `chat.archive` | 归档/恢复成功 | `null` | conversation_id、archived |
+| `chat.download` | 下载成功 | `null` | conversation_id、path、size |
+| `chat.scope_all` | 平台管理员 `scope=all` 读 | `null` | path、conversation_id、count |
+| `chat.migrate` | 迁移实际更新 > 0 行 | `null` | 三张表更新行数、bootstrap admin id、默认域 id |
+
+- **禁止**写入消息正文、标题值、工具入参/结果、产物内容、token、密码。
+- `GET /api/v1/audit?trace_id=<turn_id>` 串起该轮 `chat.send` / `chat.stop`；`?user_id=` 列出某人的 chat 动作；既有审计查询语义不变（只做加法）。
+- 审计写失败只记录本地错误日志，不阻断业务。
+
+### 12.5 边界
+
+- 本期只接入 chat 页面面；dashboard / workbench / services / knowledge / cron 的按用户/域隔离、MCP / 服务绑定 / 知识 grant 的用户化仍属后续阶段（§9 P2/P3）。
+- 并发是「每用户 8 轮 / 4 条 SSE + 全局 32 兜底」，SSE 计数在进程内、按单进程部署设计（§11 待确认项与 §10 风险表之外的已记录过渡限制）。
+- 迁移与回滚：`runs.sqlite` 同目录一次性备份 `runs.sqlite.pre-chat-multiuser`（SQLite backup API），列纯增量、旧代码可读写，不删除任何数据；NULL owner 表示引导期创建/迁移时无 admin，**永远不等于公共可见**，对所有人（含平台管理员 `scope=all`）都是 404（glisxx 2026-11-20 决策 A）。
+
+---
+
 ## 附：直接可复用的 agent-base 存量（集成排期参考）
 
 - 执行/生命周期全套（dsh 引擎、Run 状态机、工作区、冻结验证、产物哈希、超时/取消/进程树清理）——`DESIGN.md §3–§6`。

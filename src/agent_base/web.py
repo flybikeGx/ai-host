@@ -6,6 +6,7 @@ import secrets
 import threading
 import asyncio
 import json
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -18,6 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .mcp_server import public
 from .scheduler import Scheduler
+from . import chat_audit
 
 
 class WorkInput(BaseModel):
@@ -85,8 +87,10 @@ def create_app(config, *, background=True):
     scheduler = Scheduler(config)
     from .repositories import Repositories
     repositories = Repositories(config)
-    from .conversations import Conversations, ConversationBusy
+    from .conversations import (Conversations, ConversationBusy, ChatError, ChatForbidden,
+                                ChatInvalid, ChatQuota, StreamLimiter)
     conversations = Conversations(config)
+    from .identity import Identity, get_page_identity
     from .schedules import Schedules
     schedules = Schedules(scheduler)
     from .dashboard import Dashboard
@@ -115,12 +119,19 @@ def create_app(config, *, background=True):
         # Detached run supervisors continue; restarting HTTP does not replay them.
 
     app = FastAPI(title="Agent Base", lifespan=lifespan)
+    app.state.chat_streams = StreamLimiter(config.per_user_max_streams)
     app.state.scheduler = scheduler
     app.state.dashboard = dashboard
     from .knowledge_web import register as register_knowledge
     register_knowledge(app, config)
     from .governance.web import register as register_governance
     register_governance(app, config)
+    from .chat_migration import migrate_chat
+    migrate_chat(repositories.store, app.state.governance.store)
+    from .web_auth import register as register_browser_auth
+    register_browser_auth(app)
+    from .identity import register as register_identity
+    register_identity(app, config)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -137,11 +148,59 @@ def create_app(config, *, background=True):
 
     @app.exception_handler(ConversationBusy)
     async def conversation_busy(request, error):
-        return JSONResponse({"detail": str(error)}, status_code=409)
+        return JSONResponse({"detail": str(error), "code": "conversation_busy"}, status_code=409)
 
-    def authorize(authorization: str | None = Header(default=None)):
-        if token and not secrets.compare_digest(authorization or "", "Bearer " + token):
-            raise HTTPException(401, "需要 Bearer token")
+    @app.exception_handler(ChatError)
+    async def chat_error(request, error):
+        return JSONResponse({"detail": error.detail, "code": error.code}, status_code=error.status)
+
+    def chat_scope(identity: Identity, scope: str) -> bool:
+        if scope not in {"own", "all"}:
+            raise ChatInvalid("scope 只能是 own 或 all", code="invalid_scope")
+        if scope == "all" and not (identity.platform_admin or identity.is_bootstrap):
+            raise ChatForbidden("只有平台管理员可以使用只读范围", code="scope_denied")
+        return scope == "all"
+
+    def require_chat(identity: Identity, permission: str) -> None:
+        if identity.user_type == "service":
+            raise ChatForbidden("服务账号不能使用页面对话接口", code="service_account_forbidden")
+        if not identity.can(permission):
+            raise ChatForbidden(f"缺少权限：{permission}", code="permission_denied")
+
+    def reject_write_scope(scope: str | None) -> None:
+        # §5.1: write routes never accept scope; scope=all is a read-only bypass.
+        if scope is None:
+            return
+        if scope == "all":
+            raise ChatForbidden("写操作不接受只读范围", code="scope_denied")
+        raise ChatInvalid("写操作不接受 scope 参数", code="invalid_scope")
+
+    def default_domain_id():
+        from .chat_migration import default_domain
+        with app.state.governance.store.connection() as conn:
+            row = default_domain(conn)
+        return row[0] if row else None
+
+    def scope_all_audit(identity: Identity, path: str, *, conversation_id=None, count=None, domain_id=None):
+        # §10: every platform-admin scope=all read leaves one attributed audit row.
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.scope_all", domain_id=domain_id,
+            detail={"path": path, "conversation_id": conversation_id, "count": count})
+
+    def chat_domain(chat_id: str):
+        return conversations.get(chat_id).get("domain_id")
+
+    def authorize(request: Request, authorization: str | None = Header(default=None)):
+        if app.state.identity_resolver.mode == "jwt" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
+            from .identity import IdentityError
+            raise IdentityError(401, "token_invalid", "不接受共享令牌")
+        if app.state.identity_resolver.mode == "hybrid" and token and secrets.compare_digest(authorization or "", "Bearer " + token):
+            return  # Existing CLI/API management credentials remain supported.
+        browser = app.state.browser_auth
+        if browser.required() or request.cookies.get("agent_base_session"):
+            browser.require_workspace(request)
+        elif token or app.state.identity_resolver.mode == "jwt":
+            raise HTTPException(401, "需要登录或 Bearer token")
 
     api = [Depends(authorize)]
     from .service_web import register as register_services
@@ -157,79 +216,189 @@ def create_app(config, *, background=True):
     @app.get("/dashboard", response_class=HTMLResponse)
     @app.get("/knowledge", response_class=HTMLResponse)
     @app.get("/services", response_class=HTMLResponse)
+    @app.get("/login", response_class=HTMLResponse)
     def chat_page():
         if not (static / "index.html").is_file():
             raise HTTPException(503, "请先在 frontend 目录执行 npm ci && npm run build")
         return FileResponse(static / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/api/chat/targets", dependencies=api)
-    def chat_targets():
-        return conversations.targets()
+    @app.get("/api/chat/targets")
+    def chat_targets(identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.read")
+        return conversations.targets(identity, default_domain_id=default_domain_id())
 
     @app.get("/api/dashboard", dependencies=api)
     def dashboard_snapshot():
         return dashboard.snapshot()
 
-    @app.get("/api/conversations", dependencies=api)
-    def chat_list(archived: bool = False):
-        return conversations.list(archived=archived)
+    @app.get("/api/conversations")
+    def chat_list(archived: bool = False, domain_id: str | None = None, scope: str = "own",
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        if domain_id is not None and domain_id not in identity.domains:
+            raise ChatForbidden("域不可用或未加入", code="domain_forbidden")
+        result = conversations.list(archived=archived, identity=identity, domain_id=domain_id,
+                                    scope_all=scope_all, default_domain_id=default_domain_id())
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations", count=len(result), domain_id=domain_id)
+        return result
 
-    @app.post("/api/conversations", dependencies=api, status_code=201)
-    def chat_create(body: ChatInput):
-        return conversations.create(**body.model_dump())
+    @app.post("/api/conversations", status_code=201)
+    def chat_create(body: ChatInput, scope: str | None = None,
+                    identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.run")
+        reject_write_scope(scope)
+        result = conversations.create(identity=identity, default_domain_id=default_domain_id(),
+                                      **body.model_dump())
+        runtime = result["spec"]["runtime"]
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.create", domain_id=result.get("domain_id"),
+            detail={"conversation_id": result["id"], "target": result["target"],
+                    "target_kind": "admin" if result["target"] == "admin" else "repo",
+                    "title_auto": bool(result["spec"].get("auto_title")),
+                    "model": runtime.get("model"), "effort": runtime.get("effort")})
+        return result
 
-    @app.get("/api/conversations/{chat_id}", dependencies=api)
-    def chat_get(chat_id: str):
-        return conversations.snapshot(chat_id)
+    @app.get("/api/conversations/{chat_id}")
+    def chat_get(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        result = conversations.snapshot(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}", conversation_id=chat_id,
+                            domain_id=result["conversation"].get("domain_id"))
+        return result
 
-    @app.get("/api/conversations/{chat_id}/files", dependencies=api)
-    def chat_files(chat_id: str):
-        return conversations.files(chat_id)
+    @app.get("/api/conversations/{chat_id}/files")
+    def chat_files(chat_id: str, scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "file.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/files", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
+        return conversations.files(chat_id, identity, scope_all=scope_all)
 
-    @app.get("/api/conversations/{chat_id}/download", dependencies=api)
-    def chat_download(chat_id: str, path: str):
-        file = conversations.artifact(chat_id, path)
+    @app.get("/api/conversations/{chat_id}/download")
+    def chat_download(chat_id: str, path: str, scope: str = "own",
+                      identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "file.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/download", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
+        file = conversations.artifact(chat_id, path, identity, scope_all=scope_all)
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.download", domain_id=row.get("domain_id"),
+            detail={"conversation_id": chat_id, "path": path, "size": file.stat().st_size})
         return FileResponse(file, filename=file.name, media_type="application/octet-stream")
 
-    @app.patch("/api/conversations/{chat_id}", dependencies=api)
-    def chat_update(chat_id: str, body: ChatUpdate):
-        return conversations.rename(chat_id, **body.model_dump(exclude_unset=True))
+    @app.patch("/api/conversations/{chat_id}")
+    def chat_update(chat_id: str, body: ChatUpdate, scope: str | None = None,
+                    identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.write")
+        reject_write_scope(scope)
+        changes = body.model_dump(exclude_unset=True)
+        result = conversations.rename(chat_id, identity=identity, **changes)
+        # §10: titles are never recorded, only which fields changed.
+        if "title" in changes:
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.rename",
+                domain_id=result.get("domain_id"),
+                detail={"conversation_id": chat_id, "fields": ["title"]})
+        if "archived" in changes:
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.archive",
+                domain_id=result.get("domain_id"),
+                detail={"conversation_id": chat_id, "archived": bool(changes["archived"])})
+        return result
 
-    @app.post("/api/conversations/{chat_id}/messages", dependencies=api, status_code=202)
-    def chat_send(chat_id: str, body: ChatMessage):
-        return conversations.send(chat_id, body.text, body.client_key)
+    @app.post("/api/conversations/{chat_id}/messages", status_code=202)
+    def chat_send(chat_id: str, body: ChatMessage, scope: str | None = None,
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.write")
+        reject_write_scope(scope)
+        result = conversations.send(chat_id, body.text, body.client_key, identity=identity)
+        if not result.get("duplicate"):
+            chat_audit.write(
+                app.state.governance.store, identity, "chat.send",
+                domain_id=chat_domain(chat_id), trace_id=result["id"],
+                detail={"conversation_id": chat_id, "turn_id": result["id"]})
+        return result
 
-    @app.post("/api/conversations/{chat_id}/stop", dependencies=api)
-    def chat_stop(chat_id: str):
-        return conversations.cancel(chat_id)
+    @app.post("/api/conversations/{chat_id}/stop")
+    def chat_stop(chat_id: str, scope: str | None = None,
+                  identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "agent.cancel")
+        reject_write_scope(scope)
+        result = conversations.cancel(chat_id, identity=identity)
+        chat_audit.write(
+            app.state.governance.store, identity, "chat.stop",
+            domain_id=chat_domain(chat_id), trace_id=result.get("turn_id"),
+            detail={"conversation_id": chat_id, "turn_id": result.get("turn_id"),
+                    "requested": bool(result.get("requested"))})
+        return result
 
-    @app.get("/api/conversations/{chat_id}/events", dependencies=api)
-    async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False):
-        conversations.get(chat_id)
+    @app.get("/api/conversations/{chat_id}/events")
+    async def chat_events(chat_id: str, request: Request, after: int = 0, once: bool = False,
+                          scope: str = "own", identity: Identity = Depends(get_page_identity)):
+        require_chat(identity, "task.read")
+        scope_all = chat_scope(identity, scope)
+        row = conversations.owned(chat_id, identity, scope_all=scope_all)
+        if scope_all:
+            scope_all_audit(identity, "/api/conversations/{id}/events", conversation_id=chat_id,
+                            domain_id=row.get("domain_id"))
         try:
             cursor = max(0, after, int(request.headers.get("last-event-id", "0")))
         except ValueError:
             raise HTTPException(400, "事件游标无效")
+        stream_key = identity.user_id or "anonymous"
+        if not app.state.chat_streams.acquire(stream_key):
+            raise ChatQuota("同时打开的对话流已达上限", code="user_stream_quota")
+
+        def revoked() -> bool:
+            # §6.3: once the stream is open, a disabled user / removed domain /
+            # revoked permission / scope loss must end it within 30 seconds.
+            try:
+                fresh = app.state.identity_resolver.resolve_page(request)
+            except Exception:
+                return True
+            return (fresh is None or fresh.user_id != identity.user_id
+                    or fresh.current_domain != identity.current_domain
+                    or not fresh.can("task.read")
+                    or (scope_all and not (fresh.platform_admin or fresh.is_bootstrap)))
+
         async def stream():
             nonlocal cursor
-            idle = 0
-            while not await request.is_disconnected():
-                batch = await asyncio.to_thread(conversations.events, chat_id, cursor)
-                for event in batch:
-                    cursor = event["seq"]
-                    yield f"id: {cursor}\nevent: update\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if once:
-                    if len(batch) == 200:
-                        continue
-                    break
-                if not batch:
-                    idle += 1
-                    if idle % 40 == 0:
-                        await asyncio.to_thread(conversations.reconcile)
-                        yield ": keepalive\n\n"
-                    await asyncio.sleep(0.25)
-                else:
-                    idle = 0
+            try:
+                idle = 0
+                checked = time.monotonic()
+                while not await request.is_disconnected():
+                    if time.monotonic() - checked >= 2:
+                        checked = time.monotonic()
+                        if await asyncio.to_thread(revoked):
+                            yield 'event: error\ndata: {"code": "unauthorized"}\n\n'
+                            return
+                    batch = await asyncio.to_thread(conversations.events, chat_id, cursor, identity, scope_all=scope_all)
+                    for event in batch:
+                        cursor = event["seq"]
+                        yield f"id: {cursor}\nevent: update\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    if once:
+                        if len(batch) == 200:
+                            continue
+                        break
+                    if not batch:
+                        idle += 1
+                        if idle % 40 == 0:
+                            await asyncio.to_thread(conversations.reconcile)
+                            yield ": keepalive\n\n"
+                        await asyncio.sleep(0.25)
+                    else:
+                        idle = 0
+            finally:
+                app.state.chat_streams.release(stream_key)
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.get("/api/repos", dependencies=api)
@@ -237,8 +406,22 @@ def create_app(config, *, background=True):
         return repositories.list()
 
     @app.post("/api/repos/install", dependencies=api, status_code=201)
-    def install_repo(body: RepoInput):
-        return repositories.install(body.origin, body.ref)
+    def install_repo(body: RepoInput, request: Request):
+        from .chat_migration import default_domain
+        # Keep existing repos authorization; resolve page identity only when
+        # supplied. CLI/shared-token callers retain the default-domain fallback.
+        domain_id = None
+        if request.cookies.get("agent_base_session") or (
+            request.headers.get("authorization") and
+            request.headers.get("authorization") != "Bearer " + (token or "")
+        ):
+            identity = app.state.identity_resolver.resolve(request, page=True)
+            domain_id = identity.current_domain
+        if domain_id is None:
+            with app.state.governance.store.connection() as conn:
+                domain = default_domain(conn)
+                domain_id = domain[0] if domain else None
+        return repositories.install(body.origin, body.ref, domain_id=domain_id)
 
     @app.post("/api/repos/{installation_id}/start", dependencies=api)
     def start_repo(installation_id: str):

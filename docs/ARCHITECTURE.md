@@ -170,8 +170,10 @@ flowchart TB
 
 - React + FastAPI 同进程；原生 session 续接（刷新/切换不取消生成）；消息 `client_key` 幂等；每会话同时一轮、全局活动/排队上限 32；SSE 从 cursor 重放，断线只断订阅。
 - Admin 不占仓库执行位置；repo 每轮关联一个 Run。
-- 页面：`/chat`（对话）、`/dashboard`（仪表盘：MCP/Agent/工作区/系统指标，只读采样）、`/services`（共享服务管理）、`/knowledge`（知识库管理）、`/cron`（定时计划）。
-- Web 安全：默认 loopback 绑定、TrustedHost、跨 Origin 写拒绝、可选 `AGENT_BASE_WEB_TOKEN`；既有 `/api/*` 仍是本机管理面，多用户身份/RBAC 走独立的 `/api/v1`（§13）。
+- 页面：`/login`（已有账号登录，无注册入口）、`/chat`（对话）、`/dashboard`（仪表盘：MCP/Agent/工作区/系统指标，只读采样）、`/services`（共享服务管理）、`/knowledge`（知识库管理）、`/cron`（定时计划）。
+- Web 安全：默认 loopback 绑定、TrustedHost、跨 Origin 写拒绝、原 `AGENT_BASE_WEB_TOKEN`；账号启用后浏览器使用服务端会话，全局工作台限全局管理员，普通用户可登录本人信息页。治理 API/RBAC 仍由 `/api/v1` 提供（§13）。
+- **身份与 chat 数据流（2026-11-20）**：浏览器 Cookie 或 Bearer → `identity.get_page_identity` 解析唯一 `Identity`（重读用户状态、域 membership、当前域权限）→ chat 路由只接收 `identity`，按 id 的读写都经 `conversations.owned()` 收口（非本人/不存在/NULL owner/域不可见统一 404）→ 每个动作写 `chat.*` 审计（`trace_id` 对 send/stop 为 `turn_id`）。`GET /api/v1/me` 返回 `domains[].permissions`，前端只据此显隐入口。
+- **隔离与配额**：会话列表恒按 owner 过滤，Agent 列表按当前域且 Admin Agent 仅平台管理员；`scope=all` 只对平台管理员开放、只读并每次审计；每用户 8 个活跃轮次 / 4 条 SSE（进程内计数），全局 32 与单会话 1 轮沿用。迁移在启动时幂等回填 `owner_user_id` / `domain_id` 并做一次性备份，NULL owner 不表示公共可见（对所有人 404，含 `scope=all`）。契约与判定顺序见 [CHAT_MULTIUSER_DESIGN.md](CHAT_MULTIUSER_DESIGN.md)。
 - 详见 [WebChat.md](WebChat.md)、[Dashboard.md](Dashboard.md)。
 
 ## 11. Admin MCP 与看护 Agent
@@ -254,6 +256,8 @@ flowchart TB
 | `governance/service.py` | `Governance` 门面：密钥管理、bootstrap、登录（口令/API key/企业 OSS 账号）、域/用户/角色/分组/成员/授权 CRUD、审计、`authorize`；`login_with_oss`（token → 工号回查 → 首次自动建号低权 viewer → 签发 JWT） |
 | `governance/oss.py` | `OssAuth` 客户端：`verify(token)` 把 OSS 签发的 token 透传给 `POST {endpoint}/auth/getUserDetail`（`X-Auth-Token`）回查 `{w3account, department, region}`；密码不经平台 |
 | `governance/web.py` | `/api/v1` 路由 + JWT 依赖 + 权限门控（`x-domain-id` 定域）：auth/login、auth/oss、auth/api-key、me、permissions、domains、users、roles、groups、memberships、grants、audit |
+| `web_auth.py` / `AuthShell.jsx` | 浏览器账号登录、HttpOnly 会话恢复/退出、过期处理、全局工作台过渡门控及普通用户账号页；原治理 Bearer 接口保持兼容 |
+| `identity.py` / `chat_migration.py` / `chat_audit.py` / `conversations.owned()` | chat 页面面的 `Identity` 统一解析（Cookie / Bearer / 本机引导）、启动时幂等迁移与一次性备份、`chat.*` 审计、按 id 归属收口；`/me` 增加 `domains[].permissions` 与 `POST /api/v1/auth/refresh`（C1–C5，契约见 [CHAT_MULTIUSER_DESIGN.md](CHAT_MULTIUSER_DESIGN.md)） |
 | `mocks/oss.py` | 本地模拟 OSS 统一登录 REST（I-4 验证）：`/auth/login`（工号+密码换 token）、`/auth/getUserDetail`（凭 `X-Auth-Token` 回查）、`/health`；演示工号 `w000001/2/3` |
 | `mocks/mcp.py` | 模拟通用 MCP 服务器（`echo`/`add`），streamable-http（remote）/stdio（embedded）双模，验证网关统一调用与反向代理 |
 | `mocks/knowledge.py` | 模拟知识库 MCP（`knowledge_catalog/search/read/submit`），契约对齐真实 `knowledge_mcp.py`，验证知识库经注册表接入网关 |
@@ -261,7 +265,9 @@ flowchart TB
 | `cli.py::{oss-mock,mcp-mock,knowledge-mock}` | 启动对应模拟服务（`--port` 默认 8890/8891/8892） |
 
 - **零新依赖**：仅 stdlib `sqlite3` + `hashlib/hmac`，不引入 SQLAlchemy/PyJWT/passlib。
-- **非侵入**：独立 `control.sqlite`、独立 `/api/v1`、独立令牌，不触碰既有 `/api/*`（仍走 `AGENT_BASE_WEB_TOKEN`）与单用户执行逻辑。
+- **浏览器登录接缝（2026-11-19）**：治理 API 仍使用独立 `control.sqlite` 与签名令牌；新增 `web_auth.py` 复用治理账号提供 `/login` 和浏览器会话。浏览器仅保存 HttpOnly、SameSite=Lax 的随机 Cookie，库中只存哈希，20 分钟绝对过期，退出删除服务端记录；HTTPS 下设置 Secure。刷新、页面跳转和新请求通过同源 Cookie 恢复身份，当前用户状态与权限每次从数据库核对。
+- **旧工作台边界**：没有治理账号时保留原本机模式；存在治理账号后，旧 `/api/*` 要求浏览器拥有全部全局管理权限，或显式提供原管理 Bearer token。普通用户可登录并读取自身信息，但不能因此访问全局工作台/知识库管理。该过渡门控不冒充已实现的对象级分域授权；SSE、下载和知识管理使用相同浏览器会话。`/api/v1` 同时接受该浏览器会话，原 Bearer 接口保持兼容。
+- **SSO 当前能力**：OSS 仍只有上游 token 身份回查及本地账号映射，未配置浏览器跳转/回调协议、刷新令牌或企业统一退出；登录页明确展示实际状态，不提供虚假的一键 SSO 或自助注册入口。浏览器退出只撤销本平台浏览器会话。
 - **模拟服务解耦**：`mocks/` 是独立子包，承载 OSS / MCP / 知识库三个可独立运行的假服务，仅供本地端到端验证，不与生产代码（`governance`/`registry`/`gateway`）耦合。
 
 ### 13.3 关键设计决策
@@ -303,8 +309,9 @@ flowchart TB
 | 会话 grant（新） | 外部客户端（签发响应一次性获得） | Bearer | 解绑即时 / TTL 到期 |
 | 知识库 grant | 同上两种来源 | Bearer | `revoke_actor` / 绑定停用 |
 | OSS 登录 token | OSS 侧签发，平台只在登录时透传 | `X-Auth-Token`（仅回查，不落盘） | OSS token 过期（TTL）/ OSS 侧吊销 |
+| 浏览器账号会话 | 浏览器 HttpOnly Cookie；`control.sqlite.browser_sessions` 仅存哈希 | 同源 Cookie，HTTPS 下 Secure | 服务端退出删除、20 分钟到期、账号停用；权限减小实时收窄工作台入口 |
 
-边界声明：既有 Web API 是本机管理面（loopback + 可选 token）；治理层 `/api/v1`（§13）提供身份/RBAC 数据面，但不是执行隔离——目录/venv/命名空间不是安全沙箱，名称过滤不是恶意代码防护。多用户执行强隔离仍暂缓（方向：每用户独立实例 + 容器执行边界）。
+边界声明：既有 Web API 仍是本机全局管理面（loopback + 原 token，或账号启用后的全局管理员会话）；治理层 `/api/v1`（§13）提供身份/RBAC 数据面，但不是执行隔离——目录/venv/命名空间不是安全沙箱，名称过滤不是恶意代码防护。多用户执行强隔离仍暂缓（方向：每用户独立实例 + 容器执行边界）。
 
 ## 16. 协议与技术基线
 
@@ -328,6 +335,9 @@ flowchart TB
 - 会话授权签发依赖 Web 管理面身份；对外开放前需独立主体模型（见路线图）。
 - Windows 真机、真实内网（CodeAgent、企业代理/CA、真实工单后端）为现场待验收项。
 - 知识库扩展（Installation 声明式绑定、分层过滤、自动退避恢复、导入导出）未实现。
+- chat 页面面的多用户接入是**单进程**实现：每用户 SSE 连接计数在内存中，`agent-base serve` 多 worker/多进程时各自计数，不能作为全局配额；本期不支持。会话列表与按 id 访问已按 owner+domain 收敛，但同机其他用户仍共享进程、配置与数据库文件，不能当作多租户安全沙箱。
+- 页面面默认只绑定 loopback，`TrustedHostMiddleware` 只接受本机 Host；跨主机访问必须由反向代理终止 HTTPS 并保持允许的 Host，不能为「先能用」放宽该校验。浏览器 Cookie 会话 20 分钟绝对到期需重登；Bearer `refresh` 无状态换新、没有绝对会话上限。
+- `conversations.owner_user_id IS NULL` 的存量会话对所有人 404（含平台管理员 `scope=all`），不做额外回填（glisxx 2026-11-20 决策 A）；这是 §8.2 表格与 §5.3 冻结代码的已记录差异，实现采用 §5.3 顺序。
 
 ## 18. 演进路线
 

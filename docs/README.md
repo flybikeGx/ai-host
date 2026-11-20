@@ -15,7 +15,7 @@
 | [模型 provider 配置](Providers.md) | 内部网关路由、模型目录、凭据引用与失败行为 |
 | [Repo 运行契约](RepoContract.md) | entrypoint、任务参数、结构化汇报和产物验证 |
 | [本地 Agent 导出指南](export-guild.md) | 将已有本地 Agent 整理为可安装 repo |
-| [网页对话](WebChat.md) | 多轮会话、流式事件、取消和接口 |
+| [网页对话与登录](WebChat.md) | 账号登录、会话与 SSO 边界、多轮会话、流式事件和接口 |
 | [工作调度](Scheduling.md) | CLI、Web、cron 触发和运行生命周期 |
 | [定时任务页面](SchedulingUI.md) | 一次性计划、周期计划和运行报告 |
 | [运行仪表盘](Dashboard.md) | Agent、MCP、工作区和系统指标 |

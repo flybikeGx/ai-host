@@ -1,4 +1,4 @@
-"""治理面 HTTP API：``/api/v1`` 前缀，JWT Bearer 鉴权 + 权限校验。
+"""治理面 HTTP API：``/api/v1``，签名 Bearer 或同源浏览器会话 + 权限校验。
 
 独立于既有单用户 ``/api/*``（后者仍用 AGENT_BASE_WEB_TOKEN 的 Bearer token）。
 本模块只挂路由，不新建 FastAPI 实例；鉴权为签名的 ``control.secret`` JWT，权限以
@@ -6,9 +6,10 @@
 """
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..identity import Identity, IdentityError, get_identity, get_bearer_identity
 from .gateway import Gateway
 from .registry import ServiceRegistry
 from .service import Governance
@@ -119,19 +120,16 @@ def register(app: FastAPI, config):
     app.state.gateway = gateway
     gov.bootstrap()
 
-    def current_user(authorization: str | None = Header(default=None)) -> dict:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(401, "需要 Bearer token")
-        try:
-            return gov.decode(authorization[7:])
-        except ValueError as error:
-            raise HTTPException(401, str(error))
+    def current_user(request: Request, identity: Identity = Depends(get_identity)) -> dict:
+        # Adapter for existing governance audit/actor contracts. No credential
+        # claims are trusted here; identity has already re-read the user.
+        return {"sub": identity.user_id, "jti": request.state.identity_trace_id}
 
     def permission(perm: str):
-        def dep(request: Request, payload: dict = Depends(current_user)) -> dict:
-            domain_id = request.headers.get("x-domain-id")
-            if not gov.authorize(payload["sub"], perm, domain_id):
-                raise HTTPException(403, f"缺少权限：{perm}")
+        def dep(identity: Identity = Depends(get_identity),
+                payload: dict = Depends(current_user)) -> dict:
+            if not identity.can(perm):
+                raise IdentityError(403, "permission_denied", f"缺少权限：{perm}")
             return payload
         return dep
 
@@ -159,13 +157,23 @@ def register(app: FastAPI, config):
         except ValueError as error:
             raise HTTPException(401, str(error))
 
+    @app.post("/api/v1/auth/refresh")
+    def refresh(identity: Identity = Depends(get_bearer_identity)):
+        return gov._issue_session(gov.store.get_user(identity.user_id), ttl=1200)
+
     @app.get("/api/v1/me")
-    def me(payload: dict = Depends(current_user)):
-        try:
-            user = gov.principal(payload["sub"])
-        except ValueError as error:
-            raise HTTPException(404, str(error))
-        user["effective_permissions"] = gov.effective_permissions(payload["sub"], None)
+    def me(identity: Identity = Depends(get_identity)):
+        user = gov.principal(identity.user_id) if identity.user_id else {
+            "id": None, "username": None, "user_type": "bootstrap", "roles": []}
+        memberships = {m["domain_id"]: m for m in user.get("domains", [])}
+        user["platform_admin"] = identity.platform_admin
+        user["home_domain_id"] = identity.home_domain_id
+        user["domains"] = [
+            {**d, "joined_at": 0.0, **memberships.get(d["id"], {}),
+             "permissions": sorted(identity.permissions if identity.is_bootstrap else
+                                   gov.effective_permissions(identity.user_id, d["id"]))}
+            for d in gov.list_domains() if d["id"] in identity.domains]
+        user["effective_permissions"] = sorted(identity.permissions) if identity.is_bootstrap else gov.effective_permissions(identity.user_id, None)
         return user
 
     @app.get("/api/v1/permissions")
