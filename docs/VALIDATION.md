@@ -368,3 +368,22 @@ Web 已登记 finance-demo、inventory-demo、research-demo 三个工作，并�
 - `npm run build`、`git diff --check` 通过；生产静态文件已更新。桌面/手机截图已目视检查。
 
 全部测试使用隔离目录、虚构账号与本机模拟服务，未读取或创建现有业务账号/企业登录态，没有执行真实付费模型调用。未重启已有业务 Web/cron/MCP。日志、JUnit、源码摘要与截图保存在本机忽略目录 `.agent-base/validations/login-20261119/`。企业 SSO 跳转协议与真实身份提供方仍待后续接入验证。
+
+## 2026-11-24 信息台第一方 MCP 包（AIHO-32）
+
+基线为 AIHO-33 D1 冻结提交 `63ea6c9`（在本任务分支以合并提交接入，丢弃旧的散落布局快照），新增
+`first_party/info_board/`：五个 MCP 工具、独立 SQLite/审计、Streamable HTTP 单例服务、只读人类
+API `/api/info/*` 与平铺页面 `/info`、manifest 驱动的安装/启停与运行期注入。所有验证使用隔离临时
+目录、虚构凭据和 fake CLI，未执行真实付费模型调用。
+
+- `python3 scripts/ci.py full` **exit 0**（`.`ci-reports/20261124-170643-a0a48bb2``，提交 `2607fcd`）：
+  unit **319 passed, 3 skipped**；`npm run build`；Playwright 浏览器 **24 passed**；real-e2e 用真实
+  `agent-base serve` 进程 + CLI 安装/停用/启用/卸载 + 真实 Streamable HTTP MCP 调用 + 人类读取
+  API 验证全链路与数据保留；mock-restart 通过。
+- 信息台专项：CRUD/分页/搜索/409/404/长度限制/审计不含正文/重启数据保留；真实 MCP 握手、五工具、
+  8000 字符列表预算、错误 token 401、浏览器 Origin 403；Run、网页对话和 Admin 注入与幂等、停用与
+  启动失败不阻断 Run；HTTP 未登录 401、摘要/详情、分页/搜索与停用 404；`/info` 浏览器用例覆盖
+  平铺列表、搜索、展开、XSS/远程图片安全与 390px 布局。
+- 已知边界：本分支的 `scripts/ci.py` real-e2e 验证信息台能力；`gitee/main` 上的多用户聊天 real-e2e
+  需在合并该分支时恢复。信息台 `installation.default: available`，需显式
+  `agent-base mcp install info-board`。
