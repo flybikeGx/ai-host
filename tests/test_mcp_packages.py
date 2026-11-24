@@ -271,5 +271,8 @@ def test_cli_validate_and_packages(tmp_path, config):
                               capture_output=True, text=True, env=environment, timeout=60)
     assert packages.returncode == 0, packages.stderr
     summary = json.loads(packages.stdout)
-    assert summary["count"] == 0
+    assert summary["count"] == 1
+    assert summary["packages"][0]["id"] == "info-board"
+    assert summary["packages"][0]["installed"] is False
+    assert summary["packages"][0]["enabled"] is False
     assert summary["skipped"] == ["file_hub", "knowledge"]

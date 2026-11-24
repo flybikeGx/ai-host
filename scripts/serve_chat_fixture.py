@@ -82,6 +82,20 @@ try:
     ui_agent = stores.ensure_agent_identity(source="repo:" + "u" * 16, name="ui-triage-agent")
     ServiceCatalog(config).bind(agent_id=ui_agent["id"], deployment_id="ticket-ui", alias="tickets",
                                 tools=["ticket_search"])
+    from agent_base.mcp_packages import Installations, load_package
+    from first_party.info_board.backend.store import InfoBoard
+    info_package = load_package(project / "first_party/info_board")
+    Installations(config.data / "mcp").install(info_package)
+    board = InfoBoard(config.data / info_package.data_dir)
+    if not board.list_posts(limit=1)["items"]:
+        board.create(
+            "信息台浏览器演示",
+            "# 平铺信息\n\n这是通过 MCP 发布的 Markdown 信息。\n\n"
+            "- 单列卡片，最新在上\n- 页面只读\n\n"
+            "<script>window.__infoXss=true</script>\n\n"
+            "![远程图片](https://example.com/tracker.png)\n\n"
+            "[外部链接](https://example.com/docs)",
+            ["演示", "浏览器"], author="repo:ui-fixture")
     app = create_app(config)
     @app.post('/fixture/auth/setup')
     def setup_browser_auth():
