@@ -1,0 +1,55 @@
+schema_version: 1
+kind: mcp-package
+
+id: example-package
+title: 示例 MCP 包
+version: 0.1.0
+contract: example-package/v1
+description: 第一方 MCP 包模板，只提供一个 echo 工具和最小页面
+
+service:
+  transport: streamable_http
+  runtime:
+    argv:
+      - ${runtime.python}
+      - ${package.root}/server.py
+      - --port
+      - ${service.port}
+      - --data
+      - ${service.data}
+    endpoint_path: /mcp
+    environment: {}
+  health:
+    path: /health
+    expected_tools: [echo]
+    probe_tool:
+      tool: echo
+      arguments: {text: "健康探测"}
+    startup_timeout_seconds: 30
+  data:
+    dir: example-package
+    retention: keep
+  operations:
+    restart_safe: true
+    session_sharing: safe
+
+frontend:
+  mount: spa-module
+  route: /example
+  navigation: {label: 示例包, icon: box, order: 90}
+  entry: frontend/src/index.jsx
+  requires: [example.read]
+  standalone: false
+
+installation:
+  default: available
+  steps: []
+  upgrade: restart
+  uninstall: keep-data
+  requires_agent_base: ">=0.1.0"
+
+permissions:
+  anonymous: false
+  session: same-origin-cookie
+  api: [example.read]
+  service_tools: [echo]

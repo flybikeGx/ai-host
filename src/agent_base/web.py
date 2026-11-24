@@ -93,8 +93,6 @@ def create_app(config, *, background=True):
     dashboard = Dashboard(config, scheduler)
     from .knowledge_service import KnowledgeService
     knowledge_service = KnowledgeService(config)
-    from .info_board_service import InfoBoardService
-    info_board_service = InfoBoardService(config)
     token = os.environ.get("AGENT_BASE_WEB_TOKEN")
 
     @asynccontextmanager
@@ -107,12 +105,6 @@ def create_app(config, *, background=True):
             except ValueError:
                 import logging
                 logging.exception('Knowledge MCP unavailable; management UI remains accessible')
-            if info_board_service.enabled:
-                try:
-                    await asyncio.to_thread(info_board_service.ensure)
-                except ValueError:
-                    import logging
-                    logging.exception('Info Board MCP unavailable; management UI remains accessible')
             thread.start()
             dashboard.start()
         yield
@@ -131,8 +123,6 @@ def create_app(config, *, background=True):
     register_governance(app, config)
     from .web_auth import register as register_browser_auth
     register_browser_auth(app)
-    from .info_board_web import register as register_info_board
-    register_info_board(app, config)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -173,7 +163,6 @@ def create_app(config, *, background=True):
     @app.get("/cron", response_class=HTMLResponse)
     @app.get("/dashboard", response_class=HTMLResponse)
     @app.get("/knowledge", response_class=HTMLResponse)
-    @app.get("/info", response_class=HTMLResponse)
     @app.get("/services", response_class=HTMLResponse)
     @app.get("/login", response_class=HTMLResponse)
     def chat_page():

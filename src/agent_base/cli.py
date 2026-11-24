@@ -14,6 +14,23 @@ def emit(value):
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def validate_packages(path=None):
+    """Read-only manifest validation; usable without an existing config."""
+    from .mcp_packages import discover, load_package, skipped
+    target = Path(path) if path else PROJECT / "first_party"
+    if target.is_file() or (target / "mcp.yaml").is_file():
+        packages = [load_package(target)]
+        missing = []
+    else:
+        packages = list(discover(target).values())
+        missing = skipped(target)
+    emit({"ok": True, "skipped": missing, "packages": [{
+        "id": package.id, "title": package.title, "version": package.version,
+        "contract": package.contract, "route": package.route, "mount": package.mount,
+        "data_dir": package.data_dir, "manifest": str(package.manifest_path)}
+        for package in packages]})
+
+
 def main():
     parser = argparse.ArgumentParser(prog="agent-base", description="仓库 Agent 基座：dsh 原生循环 + Python 任务管理")
     parser.add_argument("--config", default=os.environ.get("AGENT_BASE_CONFIG", str(PROJECT / "agent-base.toml")))
@@ -26,8 +43,6 @@ def main():
     opening.add_argument('--port', type=int, default=8765)
     knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
     knowledge.add_argument('knowledge_action', choices=['status','start','stop','restart'])
-    info = commands.add_parser('infoboard', help='管理共享信息台 MCP')
-    info.add_argument('infoboard_action', choices=['status','start','stop','restart'])
     control = commands.add_parser('control', help='治理面：域/用户/角色/RBAC/审计控制面')
     control_actions = control.add_subparsers(dest='control_action', required=True)
     control_init = control_actions.add_parser('init', help='引导：种子内置角色 + 创建 admin 平台管理员')
@@ -82,11 +97,14 @@ def main():
     service_bind.add_argument("--repo-source", help="repo:<repo_id> 来源映射")
     service_bind.add_argument("--contract")
     service_commands.add_parser("bindings")
-    mcp = commands.add_parser("mcp", help="MCP 发现：平台全部 MCP 清单与各 Agent 接入配置")
+    mcp = commands.add_parser("mcp", help="MCP 发现与第一方 MCP 包清单")
     mcp_commands = mcp.add_subparsers(dest="mcp_action", required=True)
     mcp_commands.add_parser("list")
     mcp_config = mcp_commands.add_parser("config")
     mcp_config.add_argument("--agent", default="opencode", choices=["dsh", "opencode", "claude-code"])
+    mcp_commands.add_parser("packages", help="列出 first_party 包清单、安装/启用状态与未加载占位目录")
+    mcp_validate = mcp_commands.add_parser("validate", help="校验一个包或 first_party 根目录的清单（只读）")
+    mcp_validate.add_argument("path", nargs="?", help="包目录、mcp.yaml 或 first_party 根目录；缺省为仓库 first_party")
     register_external = service_commands.add_parser("register-external")
     register_external.add_argument("deployment_id")
     register_external.add_argument("service_id")
@@ -149,6 +167,9 @@ def main():
         if args.action == "init":
             emit({"config": str(initialize(Path(args.config), engine=args.engine, command=args.command))})
             return
+        if args.action == "mcp" and args.mcp_action == "validate":
+            validate_packages(args.path)
+            return
         config = Config.load(args.config)
         if args.action == 'open':
             import webbrowser
@@ -168,17 +189,6 @@ def main():
             if args.knowledge_action in {'start','restart'}:
                 result = service.ensure(explicit=True)
             if args.knowledge_action == 'status':
-                result = service.status()
-            emit(result)
-            return
-        if args.action == 'infoboard':
-            from .info_board_service import InfoBoardService
-            service = InfoBoardService(config)
-            if args.infoboard_action in {'stop','restart'}:
-                result = service.stop()
-            if args.infoboard_action in {'start','restart'}:
-                result = service.ensure(explicit=True)
-            if args.infoboard_action == 'status':
                 result = service.status()
             emit(result)
             return
@@ -259,18 +269,12 @@ def main():
             from .scheduler import Scheduler
             scheduler = Scheduler(config)
             if args.action == "worker":
-                import logging
                 from .knowledge_service import KnowledgeService
-                from .info_board_service import InfoBoardService
                 try:
                     KnowledgeService(config).ensure()
                 except ValueError:
+                    import logging
                     logging.exception('Knowledge MCP unavailable')
-                try:
-                    if InfoBoardService(config).enabled:
-                        InfoBoardService(config).ensure()
-                except ValueError:
-                    logging.exception('Info Board MCP unavailable')
                 if args.once:
                     emit(scheduler.tick())
                 else:
@@ -397,6 +401,10 @@ def main():
                                                headers=headers, owner=args.owner))
             return
         if args.action == "mcp":
+            if args.mcp_action == "packages":
+                from .mcp_packages import PackageRegistry
+                emit(PackageRegistry(PROJECT / "first_party", config.data / "mcp").summary())
+                return
             from .mcp_discovery import MCPDiscovery
             discovery = MCPDiscovery(config)
             if args.mcp_action == "list":

@@ -264,11 +264,6 @@ class Dashboard:
         core_status = KnowledgeService(self.config).status()
         if pid_state(core_status.get('pid'), core_status.get('birth')) == 'alive':
             roots.append({'pid': core_status['pid'], 'birth': core_status['birth'], 'owner': '_knowledge_core', 'category': 'mcp'})
-        from .info_board_service import InfoBoardService
-        info_status = InfoBoardService(self.config).status()
-        if pid_state(info_status.get('pid'), info_status.get('birth')) == 'alive':
-            roots.append({'pid': info_status['pid'], 'birth': info_status['birth'],
-                          'owner': '_info_board_core', 'category': 'mcp'})
         # Shared service deployments are measured once per real process, keyed
         # by deployment_id; external endpoints never get local process metrics.
         owner_by_pid = {(root['pid'], root['birth']): root['owner'] for root in roots}
@@ -523,13 +518,8 @@ class Dashboard:
                 'managed': managed, 'agents': list(agents.values()), 'instances': instances, 'mcp': mcps, 'gateways': gateways,
                 'services': service_rows,
                 'workspaces': workspace_list[:100], 'workspace_stats': workspace_stats,
-                'core_services': [
-                    {'id':'knowledge','name':'Knowledge MCP','state':core_status['state'], 'pid':core_status.get('pid'),
-                     'resources':group_metrics.get('_knowledge_core'),'stats':core_status.get('stats',{}),
-                     'detail':f"{core_status.get('stats',{}).get('documents',0)} 篇知识 · {core_status.get('stats',{}).get('pending',0)} 份待审投稿"},
-                    {'id':'info-board','name':'信息台 MCP','state':info_status['state'], 'pid':info_status.get('pid'),
-                     'resources':group_metrics.get('_info_board_core'),'stats':info_status.get('stats',{}),
-                     'detail':f"{info_status.get('stats',{}).get('posts',0)} 条信息 · 发布即公开"}],
+                'core_services': [{'id':'knowledge','name':'Knowledge MCP','state':core_status['state'], 'pid':core_status.get('pid'),
+                                   'resources':group_metrics.get('_knowledge_core'),'stats':core_status.get('stats',{})}],
                 'counts': {'installed_agents': len({i['repo_id'] for i in installations if i['status']=='ready'}),
                            'running_instances': sum(i['state']=='alive' for i in instances), 'unknown_instances': sum(i['state']=='unknown' for i in instances),
                            'queued_runs': counts.get('queued', 0), 'queued_turns': sum(t['status']=='queued' for t in turns),

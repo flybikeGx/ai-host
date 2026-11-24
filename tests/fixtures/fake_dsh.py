@@ -56,48 +56,6 @@ if 'FIXTURE_KNOWLEDGE' in text:
                         await invoke('knowledge_read',{'document_id':doc['id'],'version_id':doc['version_id'],'view':'section','section_id':outline['sections'][0]['id']})
                     Path('captured-knowledge.json').write_text(json.dumps({'hits':len(results['items']),'namespace':namespace,'control_secret_in_environment':'AGENT_BASE_WEB_TOKEN' in os.environ}))
     asyncio.run(exercise_knowledge())
-if 'FIXTURE_INFO' in text:
-    import asyncio
-    import httpx
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
-    info_config = next(plugin['config'] for row in patch for plugin in row.get('insert', [])
-                       if plugin.get('id') == 'info-board')
-
-    async def exercise_info():
-        headers = {'Authorization': os.environ['AGENT_BASE_INFO_BOARD_AUTH']}
-        async with httpx.AsyncClient(headers=headers, trust_env=False) as client:
-            async with streamable_http_client(info_config['url'], http_client=client) as streams:
-                async with ClientSession(streams[0], streams[1]) as session:
-                    await session.initialize()
-
-                    async def invoke(name, arguments):
-                        call_id = uuid.uuid4().hex
-                        print(json.dumps({'type': 'tool_call', 'callId': call_id,
-                                          'tool': 'mcp__info_board__' + name, 'input': arguments},
-                                         ensure_ascii=False), flush=True)
-                        result = await session.call_tool(name, arguments)
-                        print(json.dumps({'type': 'tool_result', 'callId': call_id,
-                                          'status': 'failed' if result.isError else 'completed',
-                                          'result': result.content[0].text}, ensure_ascii=False), flush=True)
-                        assert not result.isError, result
-                        return json.loads(result.content[0].text)
-
-                    created = await invoke('info_create', {
-                        'title': '运行时信息', 'body_markdown': '# 信息\n来自真实运行链路。',
-                        'tags': ['runtime']})
-                    listing = await invoke('info_list', {'query': '运行时'})
-                    read = await invoke('info_get', {'id': created['id']})
-                    updated = await invoke('info_update', {
-                        'id': created['id'], 'title': '运行时信息（更新）',
-                        'expected_updated': created['updated']})
-                    await invoke('info_delete', {'id': created['id']})
-                    Path('captured-info.json').write_text(json.dumps({
-                        'created': created['id'],
-                        'listed': listing['items'][0]['id'] if listing['items'] else None,
-                        'body': read['body_markdown'], 'updated': updated['title'],
-                        'author': created['author']}, ensure_ascii=False))
-    asyncio.run(exercise_info())
 if 'FIXTURE_SERVICES' in text:
     # Deterministic model stand-in exercising every mounted shared service via
     # the real MCP chain (resolver -> gateway -> backend).
@@ -197,8 +155,7 @@ if 'FIXTURE_GUARDIAN' in text:
                             actions['restart'] = {'ok': False, 'error': repr(error)[:200]}
                 Path('captured-guardian.json').write_text(json.dumps(actions, ensure_ascii=False))
     asyncio.run(exercise_guardian())
-if Path(".agent/resources.json").is_file() and "FIXTURE_NO_ARTIFACT" not in text \
-        and "FIXTURE_SERVICES" not in text and "FIXTURE_INFO" not in text:
+if Path(".agent/resources.json").is_file() and "FIXTURE_NO_ARTIFACT" not in text and "FIXTURE_SERVICES" not in text:
     # Deterministic model stand-in, using the real persistent MCP protocol.
     import asyncio
     import httpx

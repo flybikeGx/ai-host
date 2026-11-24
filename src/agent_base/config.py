@@ -120,7 +120,6 @@ class Config:
     max_concurrent: int = 2
     guardian: dict = field(default_factory=dict)
     oss: dict = field(default_factory=dict)
-    info_board: dict = field(default_factory=lambda: {"enabled": True})
 
     @classmethod
     def load(cls, filename: str | Path | None = None) -> "Config":
@@ -149,8 +148,7 @@ class Config:
             raise ValueError("timeout_seconds 必须在 1–86400 之间")
         guardian = _parse_guardian(raw.get("guardian", {}))
         oss = _parse_oss(raw.get("oss", {}))
-        info_board = _parse_info_board(raw.get("info_board", {}))
-        return cls(path, data, runtime, cap, guardian, oss=oss, info_board=info_board)
+        return cls(path, data, runtime, cap, guardian, oss=oss)
 
 
 def _parse_guardian(raw) -> dict:
@@ -189,18 +187,6 @@ def _parse_oss(raw) -> dict:
     if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.netloc:
         raise ValueError("oss.endpoint 不得包含凭据、查询或片段")
     return {"endpoint": endpoint.rstrip("/")}
-
-
-def _parse_info_board(raw) -> dict:
-    if not isinstance(raw, dict):
-        raise ValueError("info_board 必须是表")
-    unknown = set(raw) - {"enabled"}
-    if unknown:
-        raise ValueError(f"info_board 包含不支持的字段：{sorted(unknown)}")
-    enabled = raw.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise ValueError("info_board.enabled 必须是布尔值")
-    return {"enabled": enabled}
 
 
 def validate_selection(runtime: dict):
@@ -250,7 +236,6 @@ def initialize(path: Path, *, engine: str = "dsh", command: str | None = None) -
         'provider = "deepseek-official"\nmodel = "deepseek-flash"\neffort = "high"\n'
         'timeout_seconds = 1800\npermission_mode = "workspace-write"\n'
         'approval_policy = "never"\n\n'
-        '[info_board]\nenabled = true\n\n'
         '# 内部网关示例（凭据只引用环境变量名，不写入本文件）：\n'
         '# [providers.internal-gateway]\n'
         '# api = "openai-completions"\n'

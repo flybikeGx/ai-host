@@ -12,8 +12,10 @@
 | 用页面安排任务 | [定时页面](SchedulingUI.md) |
 | 用 CLI/API 注册工作 | [工作调度](Scheduling.md) |
 | 安装、发布与授权共享 MCP | [共享服务](ManagedServices.md) |
+| 组织带人类前端的第一方 MCP 包 | [MCP 包契约](MCP_PACKAGE.md) |
+| 挂载 MCP 页面、导航与第三方隔离 | [MCP 前端挂载](MCP_FRONTEND.md) |
+| 了解第一方 MCP 目录化迁移 | [迁移计划](FIRST_PARTY_MCP_REFACTOR.md) |
 | 管理正式知识与审批投稿 | [知识库](Knowledge.md) |
-| 发布与浏览 Markdown 信息 | [信息台](InfoBoard.md) |
 | 理解指标与未知值 | [仪表盘](Dashboard.md) |
 | 迁入企业内网 | [CodeAgent 迁移](CODEAGENT_MIGRATION.md) |
 | 同步 Git 与离线交接 | [Git 指南](GIT_GUIDE.md) |

@@ -9,6 +9,7 @@
 | 老仓库兼容 | schema_version:1，每次 Run 安装资源 |
 | Repo 长期安装 | schema_version:2，固定 skills、环境和常驻私有 MCP |
 | 跨 Agent 共享服务 | schema_version:3，服务部署、发布、Agent 绑定分别管理 |
+| 第一方 MCP 包 | `first_party/<id>/mcp.yaml`，schema_version:1、kind:mcp-package；目录名 = id 中的 `-` 换 `_` |
 | 安装机器配置 | 根 agent.yaml 或 Installation.md 唯一 agent-base-install 块，不能双写 |
 | 服务传输 | stdio、streamable_http；外部服务仅经本机接入层代理 |
 | 安装版本 | 固定 commit，更新源码后需重新安装 |
@@ -35,12 +36,12 @@
 | 知识一次性管理链接 | 120 秒、使用一次 | 由 agent-base open 打开 |
 | 知识正文 | 最大 128 KiB | 当前无附件/PDF 自动导入 |
 | 知识工具响应 / 章节正文 | 最多 8000 / 6000 个字符 | 通过分页或游标继续 |
-| 信息台标题 / 正文 | 200 字符 / 256 KiB | 发布即公开，覆盖更新保留 created |
-| 信息台标签 / 列表 | 每个 ≤32 字符、最多 10 个 / 默认 20、最大 50 | 列表只回摘要，响应 ≤8000 字符 |
 | 共享服务健康检查 | 默认间隔 30 秒、超时 5 秒 | 连续失败 3 次异常、成功 2 次恢复 |
 | 服务启动宽限 | 默认 60 秒 | 示例/部署配置可能覆盖为 30 秒 |
 | 自动恢复 | 默认 10 分钟最多 3 次 | 退避 30/60/120 秒；仍受维护、排空和授权约束 |
 | 看护巡检 | 默认关闭，启用后默认间隔 300 秒 | 确定性监督不依赖看护模型可用 |
+| 第一方 MCP 安装状态 | `data/mcp/installations.json` | 缺省条目按清单 `installation.default` 推导；停用/卸载默认保留数据根 |
+| 包页面挂载 | 第一方 `spa-module`、第三方 `static-iframe` | 页面与导航由清单和启用状态决定；停用后路由 404 |
 
 实现依据：[配置](../src/agent_base/config.py)、[队列和输入](../src/agent_base/scheduler.py)、[对话](../src/agent_base/conversations.py)、[报告](../src/agent_base/reports.py)、[服务清单](../src/agent_base/manifests.py)、[知识库](../src/agent_base/knowledge.py)。变更限制时同步此表。
 
@@ -56,8 +57,8 @@
 | 关闭网页/Admin 会取消后台任务？ | 不会；需要显式取消 |
 | 失败或 interrupted 自动重试？ | 不会，先核对结果和副作用，再决定新任务 |
 | 能让多个不可信用户共用吗？ | 当前不具备多租户强执行隔离；账号/RBAC 不能代替沙箱 |
-| 信息台能按 Agent 隔离吗？ | 不能；本期全局共享，author 只用于展示/审计 |
 | 外部服务能重启吗？ | 平台只管理本机路由，不管理远端进程 |
+| 安装/启用 MCP 包就授权 Agent 吗？ | 不；工具授权仍以显式绑定或知识 grant 为准 |
 | 修改绑定就收紧所有旧 grant？ | 不能这样假设；旧 grant 未比较绑定修订号，撤权需用解绑流程 |
 
 ## 常见故障
@@ -71,7 +72,6 @@
 | 报告被判失败 | 最终 JSON、产物路径、冻结检查日志 | [运行契约](RepoContract.md) |
 | MCP 不可用 | 部署/安装状态、协议探测、脱敏日志 | [共享服务](ManagedServices.md) |
 | 知识投稿审批冲突 | 基线版本与当前正式版不同 | 比较差异，人工合并后发布 |
-| 信息台 409 冲突 | expected_updated 与当前 updated 不同 | 重新 info_get 后合并再更新 |
 | 登录后只有账号页 | 缺少全局工作台权限 | [登录说明](WebChat.md#账号登录与会话) |
 | 指标显示未知或下限 | 初次采样、权限、归属或扫描上限 | [仪表盘](Dashboard.md) |
 
