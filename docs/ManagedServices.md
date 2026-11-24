@@ -10,6 +10,9 @@
 - 托管对象是 MCP 服务包（`kind: mcp-service`）或用户维护的外部 HTTP MCP。平台不接管外部机器的进程。
 - 不实现下载已发布 Agent、临时本地运行目录、dsh GUI 自动连接、集群高可用和多租户身份平台。
 - 目录、绑定、部署数据仍在本机 `.agent-base` 下；不是安全沙箱，适用于可信团队的单机环境。
+- 第一方 MCP 包（`first_party/<id>/mcp.yaml`，见 [MCP 包契约](MCP_PACKAGE.md)）与共享服务是不同对象：
+  包状态只管服务/页面/导航是否可用，Agent 能调用哪些工具仍由本页的绑定/grant 机制决定。
+  信息台（`info-board`）是按该契约新增的包，使用说明见 [信息台](../first_party/info_board/docs/README.md)。
 
 ## 2. 从本机调试到共享使用
 

@@ -16,6 +16,7 @@
 | 挂载 MCP 页面、导航与第三方隔离 | [MCP 前端挂载](MCP_FRONTEND.md) |
 | 了解第一方 MCP 目录化迁移 | [迁移计划](FIRST_PARTY_MCP_REFACTOR.md) |
 | 管理正式知识与审批投稿 | [知识库](Knowledge.md) |
+| 发布与浏览全局 Markdown 信息 | [信息台](../first_party/info_board/docs/README.md) |
 | 理解指标与未知值 | [仪表盘](Dashboard.md) |
 | 迁入企业内网 | [CodeAgent 迁移](CODEAGENT_MIGRATION.md) |
 | 同步 Git 与离线交接 | [Git 指南](GIT_GUIDE.md) |
