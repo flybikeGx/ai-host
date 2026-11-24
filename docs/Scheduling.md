@@ -85,29 +85,11 @@ HTTP 202 表示触发请求已持久化；响应含 `run_id`、`disposition` 和
 
 OpenAPI 文档在 `/docs`。只监听 `127.0.0.1`，限制 Host，并拒绝跨 Origin 写请求。可在启动前设置 `AGENT_BASE_WEB_TOKEN`，API 则要求 `Authorization: Bearer ...`，页面有密码输入框，不持久化 token。当前是可信用户的本机管理入口；不直接开放公网。
 
-## 一次执行如何展开
+## 输入与执行
 
-1. Trigger 原子去重、检查重叠与队列容量，然后创建未派发 Run。不为排队中的工作启动进程。最大待执行队列为 100；容量不足返回错误，没有接受该触发。
-2. Dispatcher 先恢复状态，再按 FIFO 检查全局 `queue.max_concurrent`，原子预留派发位置。每个派发 Run 启动独立监督进程；旧的直接 `run/install` 命令仍兼容原有立即启动监督进程的行为，并与新队列共享活动并发上限。
-3. 领取执行位置后开始计时。在 `.agent-base/workspaces/<run-id>-<随机后缀>/repo` clone 仓库并检出固定 commit，将显式 `workspace_source` 复制到 `input/`，写入 `activation.json`。Git 代码仅包含提交内容，未提交代码不会被 clone；外部输入在**开始执行时**复制。需在登记时固定代码版本可传 commit SHA；默认 ref=HEAD 是每次开始执行时解析。
-4. 复制后的 `input` 是本次输入；运行不写回源目录。源目录应由业务侧保持复制期间一致，普通文件复制不是文件系统事务快照。忽略 `.git/.venv/node_modules/.env/.env.*` 等目录与文件，拒绝符号链接及特殊文件，上限 256 MiB / 10000 条目。仓库不能预占 `input/`（提供外部输入时）或 `activation.json`。
-5. 冻结 AGENTS、工具、技能和检查脚本，每次安装独立依赖环境；暂不共享安装缓存环境或长寿命 workspace。runtime/model/effort 在入队时快照，按本次选择生成 CLI patch。
-6. 为每次 Run 创建独立 DSH_HOME，启动 headless CLI；其 opening event 出现时立即保存 session_id，运行中即可查看。CLI 管理工具循环和任务内上下文；Python 负责进程、心跳、deadline、最终事件和验证，不跨 Run 续接 session。
-7. CLI 正常返回且输出有效后进入 verifying，执行冻结检查、归档声明产物及 SHA-256，再删除成功的临时目录并标为 succeeded。归档、日志、冻结 package 和 DSH_HOME 仍保留在持久运行目录。`result.workspace_retained=false` 表示原工作区路径已清理；清理失败会记录事件并如实标记 retained。
+工作每次触发进入持久队列，获得槽位后开始计时并创建独立工作区和 CLI session。源码只包含固定 commit；外部输入在开始执行时复制到 input/，不写回来源。复制期间应由业务侧保持来源一致。
 
-状态正常路径：`queued → preparing → running → verifying → succeeded`。`started_at`/`deadline` 在出队后设置，排队时间不计入执行时限；有效时限取工作 timeout 与仓库 wall_timeout 的较小值，覆盖准备、安装、推理及验证。进程运行期间约每秒写 heartbeat。`session_status` 记录 not_started/starting/running/finished，异常时记 failed/timed_out/cancelled/interrupted。
-
-`activation.json` 示例：
-
-```json
-{
-  "work_id": "metrics-demo",
-  "source": "web",
-  "key": "frontend-request-001",
-  "payload": {"period": "2026-11-05"},
-  "at": 1793845560.0
-}
-```
+触发信息写入 activation.json（work_id、source、key、payload、at）。输入与时限的上限见 [规格速查](Specifications.md)。执行成功后验证并归档产物、清理临时工作区；失败保留现场。
 
 ## 结束、超时与重启
 

@@ -129,100 +129,20 @@ codeagent --print --output-format text --disable-update --skip-safe-check
 
 当前 `runtime_environment` 只在设置 config_dir 时写 `CODEAGENT3_CONFIG_DIR`，并未完整移植旧 MVP 的账号选择优先级与 token 清理。内网若需要显式切换认证目录，须按实际 CLI 行为处理继承的 `CODEAGENT3_X_AUTH_TOKEN`；不要在未知账号覆盖状态下进行并发验收。
 
-## 4. 第二阶段：统一运行时适配边界
+## 4. 完整接入前需要验证什么
 
-当前需要修改的代码不止 `engines.py`：
+基础 print 调用之后，按以下顺序接入。每步以实际 CLI 能力为准，不能把更改配置当作功能已经完成。
 
-| 文件 | 当前耦合点 | 建议改造 |
-| --- | --- | --- |
-| `engines.py` | dsh 命令/patch/NDJSON、基础 codeagent argv | 运行时工厂、能力声明、环境与事件适配 |
-| `service.py` | 根据 engine 分支；CodeAgent 拒绝工具清单 | 使用适配器准备任务、启动和最终校验 |
-| `repo_runtime.py` | dsh MCP 插件 patch | 拆成中立资源描述和各 CLI 配置生成 |
-| `admin.py` | 直接构造 dsh 原生会话 | 走适配器的管理 MCP 与 session 功能 |
-| `conversations.py` | dsh 命令、原生事件和 session 续接 | 用规范化事件驱动现有网页持久化 |
-| `config.py` | 当前 engine/effort 验证与配置字段 | 能力驱动校验，保留旧配置兼容 |
+| 阶段 | 需要核对 |
+| --- | --- |
+| 运行时 | 模型/档位、stdin、退出码、超时取消、进程树清理、输出解析 |
+| MCP | 首选直连平台 HTTP 网关，验证认证头、Run 路由、完整工具目录与错误返回；确无直连能力再考虑 stdio 桥 |
+| skills | 只发现所属安装版本的技能，不继承个人全局配置 |
+| 会话 | 首次保存原生身份，多轮续接；不把网页全历史重复拼入 prompt |
+| Admin | 能调用管理 MCP，退出对话不取消已提交任务 |
+| 并发与权限 | 先并发 1，核对登录目录冲突、资源发现和业务凭据隔离 |
 
-建议接口如下，**只是设计示意，目前未实现**：
-
-```python
-class RuntimeAdapter:
-    capabilities: RuntimeCapabilities
-
-    def prepare(self, invocation, resources, native_session): ...
-    # 返回 argv、cwd、env、stdin；不执行 shell 字符串
-
-    def normalize_event(self, raw_event): ...
-    # session / text / tool_call / tool_result / error / final
-
-    def finalize(self, exit_code, normalized_events, raw_logs): ...
-    # text、native_session_id、finish_reason（若真实存在）、event_contract
-```
-
-`RuntimeCapabilities` 至少区分：单次任务、管理 MCP、repo MCP、HTTP headers、原生 session 续接、流式文本、工具事件和并发。调用方必须在提交前拒绝缺失的必要能力，不能静默忽略清单或伪造工具事件。
-
-进程派发、超时、取消、SQLite 状态、产物检查继续由 Python 通用层执行。目标 CLI 没有可用结构化输出时，可先交付 text-only 的单次任务；网页工具卡片和可靠多轮必须等真实能力适配完成。
-
-## 5. 第三阶段：MCP 与 skills 挂载
-
-### 5.1 首选：CLI 直连现有 HTTP 网关
-
-若 CodeAgent 支持 Streamable HTTP 和请求 header，在每次调用的受管目录生成配置，只注册当前 installation 的 endpoint 与 namespace。保留现有 Bearer token 环境引用和 `X-Agent-Run`；若 CLI 不支持环境引用，使用权限受限的临时配置，并防止日志记录 secret。
-
-```mermaid
-flowchart LR
-    C[CodeAgent 调用] -->|所属配置 / Run header| G[现有安装网关]
-    G -->|同一个长期连接| M[常驻上游 MCP]
-    G --> S[固定 skills / read_skill]
-    G --> T[本次 Run 工作区的业务工具]
-```
-
-网关校验 installation 与活动 Run，skills 和上游进程无需重建。每轮切换 Run header，不能复用已结束 Run 的上下文。
-
-### 5.2 备选：短生命周期 stdio 传输桥
-
-若 CodeAgent 只支持 stdio MCP，可新增薄桥：CLI 启动一个 stdio 客户端代理，再连接**已经运行的**所属安装 HTTP 网关。桥可以每次调用启动，上游业务 MCP 仍然常驻；不要把业务 MCP 配置直接复制成每任务 stdio 启动命令。
-
-```mermaid
-flowchart LR
-    C[CodeAgent] -->|stdio| B[每调用一个传输桥：待实现]
-    B -->|HTTP + token + Run| G[常驻安装网关]
-    G --> M[安装后一直运行的上游 MCP]
-```
-
-这个桥当前没有实现，需要验证工具列表/schema、中文输入、取消、工具超时与错误转发。它不负责自动重试业务调用。
-
-### 5.3 skills 和发现范围
-
-继续使用 `.agent/resources.json`、`.agent/skills/<name>/SKILL.md` 和网关 `read_skill`，不要求 CodeAgent 支持某种专属 slash skill 格式。AGENTS/skill 指令保持相对路径，安装前由 Admin 按语义审阅是否依赖本机绝对路径，安装器不再扫描文本。
-
-若 CodeAgent 会向父目录自动加载 AGENTS、用户级 skill/MCP，需要确认其停止搜索或指定配置根的实际机制。dsh 的 `.agent-base-root` 是 dsh 配置约定，不能直接假设对 CodeAgent 有效。可以继续用说明约束全局可见资源，但当前 repo 挂载清单必须准确，验收要实际调用工具确认 namespace。
-
-## 6. 第四阶段：Admin、网页与原生 session
-
-基础 print 入口当前带 `--no-session-persistence`，没有记录 session ID。需要把“单次任务”和“可续接对话”分成不同 invocation 模式，而不是给全部调用统一增加 resume 参数。
-
-建议顺序：
-
-1. 根据真实结构化事件或有文档的 hook 记录新建 session ID，不用 Python 随机 ID 冒充原生 ID。
-2. 用目标版本真实支持的恢复机制续接；历史 Hub 记录过不支持 `--session-id`，不能照抄 dsh 参数。
-3. 把每个对话的工作区、原生状态目录和身份保持一致；认证目录与 session 目录是否可分离须现场确认，不盲目复制个人认证目录。
-4. 接入管理 MCP，先验收 Admin 查询，再验收提交任务/等待与取消，验证管理调用与业务调用权限边界。
-5. 将事件规范化后接回 `conversation_events`，保留 client_key、游标重放、显式停止和文件范围规则。
-6. 用无工具的随机标记两轮记忆测试证明原生上下文续接；再做实际 MCP 两轮测试。
-
-如果 CLI 只有交互 PTY，可把 PTY 作为独立运行时分支研究，使用真实 hook/事件绑定身份。不要通过猜测终端换行、菜单文字或 ANSI 内容判定“任务完成”；无法获得稳定契约时，应限制为单次工作，暂不开网页连续对话。
-
-不能以 Python 重发全部网页历史来冒充已完成原生会话迁移；如以后选择这种方案，需要明确上下文预算、工具历史和压缩责任已经转移到基座。
-
-## 7. 第五阶段：并发、权限与进程验收
-
-保持并发 1 完成前四阶段后，再验收同账号两个独立 session、同 repo 两实例、不同 repo 实例的同时运行。检查共享认证配置是否被并发改写、session 是否串用、CLI 后台子进程是否逃逸监督范围。
-
-Windows 特别测试 `.cmd/.bat` 包装器、带空格路径、UTF-8 stdin、Ctrl+C/超时和完整进程树退出。代码已有平台分支不等于目标 CLI 的子进程行为已经通过验证。
-
-权限参数按实际版本映射，不把 dsh 的 permission/approval 字段直接作为 CodeAgent 的等价语义。工具等待授权时要有可见状态或明确失败，不能让 cron 静默悬挂到总超时。默认仍只接入可信仓库；需要不可信输入时另行增加操作系统隔离。
-
-并发解除前修改 `service.py` 的限制必须附带现场验收记录。常驻 MCP 的共享状态与串行化策略保持不变，不因增加 CLI 并发而自动重启 MCP。
+运行时接口重构与模块关系由 AOCI/源码维护；上线人员记录本机 CLI 版本、帮助输出和验收结果。不要为适配引入第二套 Python 模型循环。
 
 ## 8. 内网上线验收清单
 

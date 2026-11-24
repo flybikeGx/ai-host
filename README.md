@@ -1,250 +1,52 @@
 # Agent Base
 
-Python 编写的仓库 agent 基座：与 admin-agent 对话，让它安装、运行你提供的 Git repo。外网使用 DeepSeek Harness CLI 的原生 agent 循环，Python 管理工作目录、安装、并发、状态、取消和交付物。
+把 Git 仓库安装成可对话、可调度的 Agent。Python 管理安装、进程、任务和交付验证；CLI 运行时负责模型推理与工具循环。
 
-根 [AGENTS.md](AGENTS.md) 是 admin-agent 的指令，可以直接修改其管理方式。Python 不重新实现模型—工具循环，不调用 OpenAI-compatible 模型 API；模型请求由所选 CLI 负责。
+## 开始使用
 
-文档目录：[docs/README.md](docs/README.md)。
-
-完整说明：[系统设计总纲](docs/ARCHITECTURE.md)（唯一权威设计文档：架构、各子系统设计、安全模型、已知限制与演进路线） · [CodeAgent CLI 迁移指南](docs/CODEAGENT_MIGRATION.md) · [Git 双远端与内网交接](docs/GIT_GUIDE.md) · [验收记录](docs/VALIDATION.md)。
-
-汇报材料：立项口径的建设目标、服务场景与权限治理说明已并入 [系统设计总纲](docs/ARCHITECTURE.md)；原项目设计书草稿可在 Git 历史中检索（删除前路径 `docs/PROJECT_DESIGN_DRAFT.md`）。
-
-网页主页：<http://127.0.0.1:8765/>，自动进入仪表盘。统一纵向导航连接仪表盘、[共享服务](docs/ManagedServices.md)、[项目知识库](docs/Knowledge.md)、对话和定时任务；原工作台位于 `/workbench`，点击左上角 Agent Base 返回主页。
-
-知识库支持项目 namespace、跨 repo 共享、渐进式章节读取、Agent 新建/修改投稿、人工审批和不可变版本。首次管理连接执行 `.venv/bin/agent-base open`，一次性链接不输出凭据；Agent 仅获取范围内的读/投稿权限。完整使用说明见 [Knowledge.md](docs/Knowledge.md)。
-
-Repo 引入：[本地 Agent 导出指南](docs/export-guild.md) · [entrypoint 与结构化结果契约](docs/RepoContract.md)。
-
-治理层：身份/RBAC 骨架（域/用户/角色/权限/审计 + `/api/v1` + CLI `control`）与企业内网账号验证（OSS 统一登录 + CLI `oss-mock`）已实现，见 [设计总纲](docs/ARCHITECTURE.md) §13。多用户执行强隔离仍暂缓（§18.4；草案原文可在 Git 历史检索，删除前路径 `docs/USER_ISOLATION_DESIGN.md`），当前执行侧仍是单用户实现。
-
-共享服务：第二阶段已实现 MCP 独立托管、发布、显式绑定与看护，使用说明见 [共享 MCP 托管与看护](docs/ManagedServices.md)。MCP 发现与多 Agent 接入（2026-11-17）见设计总纲 §12。仍不建设本地 fetch、GUI 自动接入和集群高可用。
-
-## Repo 引入与无人值守入口
-
-将本地 Agent 整理为完整 repo，可把 [export-guild.md](docs/export-guild.md) 交给本地编码 Agent。新导出的 repo 提供 AGENTS.md、Installation.md 和根 entrypoint.md：分别定义长期角色、安装资源和无人值守工作流程。
-
-CLI Run、Web 工作触发、cron 和 Admin 提交的后台任务启动时，基座组合 `AGENTS.md + entrypoint.md + 本次参数/触发说明 + 如何汇报结果`。报告要求由基座动态注入，repo 不复制维护。普通网页/Admin 对话不自动执行 entrypoint。
-
-最终回复必须符合结构化 JSON 契约，解析到 `result.agent_report`；基座另写运行目录内的 `report.json`，记录可信状态、独立检查和归档产物。blocked、格式错误或产物缺失不会被判为成功。没有 entrypoint 的旧 repo 仍可使用 task/task.default，但实际 Run 也执行新的最终汇报契约。完整字段与兼容说明见 [RepoContract.md](docs/RepoContract.md)。
-
-## 直接开始
-
-新副本先按 [Installation.md](Installation.md) 执行 `python3 scripts/bootstrap.py`。已有本地 dsh、Python 环境和配置时，在已设置 `DEEPSEEK_API_KEY` 的终端执行：
+需要 Python 3.11+、uv、Git；默认 dsh 运行时还需要 Node.js 24.9+ 与 npm。
 
 ```sh
+python3 scripts/bootstrap.py
 .venv/bin/agent-base admin
 ```
 
-然后直接说：
+在启动环境配置模型凭据，再向 Admin 描述工作，例如：
 
-```text
-安装并运行 https://github.com/your-org/report-agent.git，任务是分析 input 里的数据并生成报告。
-```
+> 安装并运行 <Git 仓库地址>，分析 input 中的数据，生成报告，等待完成后给我产物。
 
-也可以连续说“先只安装这个仓库”“运行刚才安装的任务”“现在有哪几个任务”“取消任务 <run_id>”。admin 使用 MCP 管理工具操作后台任务，保持同名原生会话上下文；退出对话后后台任务继续运行。
+完整安装、已有副本升级与 Windows 用法见 [安装指南](Installation.md)。
 
-新机器安装见 [Installation.md](Installation.md)。本机默认配置为 `agent-base.toml`，运行数据保存在 `.agent-base`；两者和凭据文件都已加入忽略列表。
-
-## 模型 provider 配置
-
-不写 `[providers.*]` 时仍使用内置 `deepseek-official`，现有配置无需改动。需要内部网关或其他兼容端点时，在 `agent-base.toml` 声明路由，CLI Admin、网页 Admin、普通任务、cron 和 repo 多轮对话统一使用该路由：
-
-```toml
-[runtime]
-provider = "internal-gateway"
-model = "internal-flash"
-effort = "high"
-
-[providers.internal-gateway]
-api = "openai-completions"
-base_url = "https://llm.internal.example/v1"
-api_key_env = "INTERNAL_GATEWAY_API_KEY"
-
-[[providers.internal-gateway.models]]
-id = "internal-flash"
-context_window = 131072
-
-[providers.internal-gateway.models.reasoning_efforts]
-high = "high"
-```
-
-配置只引用凭据的环境变量名，不写值；缺少 provider、模型不在目录、档位未声明或凭据未设置都会明确失败，不会回退到官方 provider 或其他模型。字段、生效范围、快照语义和失败行为见 [docs/Providers.md](docs/Providers.md)，完整模板是 [config/internal-gateway.example.toml](config/internal-gateway.example.toml)。
-
-## 网页对话
-
-侧栏新增 [运行仪表盘](docs/Dashboard.md)，打开 <http://127.0.0.1:8765/dashboard> 查看实际运行的 dsh 实例及工作区磁盘、逐个 MCP 服务的 CPU/内存、独立网关开销，以及整机趋势、队列/调度心跳和最近异常。空闲对话与常驻 MCP 不算 dsh 实例，结束后保留的工作区仍展示磁盘大小。状态约每 3 秒刷新，工作区大小约每 30 秒采样；查看页面不会触发模型或重启 MCP。
-
-从 AGENTS 列表选择 Agent 发起新对话；最近对话默认显示全部，可按 Agent 筛选。独立 [定时页面](docs/SchedulingUI.md) 位于 `/cron`，可图形化选择 Agent、一次性日期或每天/每周计划，使用 entrypoint 并查看结构化报告。
-
-启动 `.venv/bin/agent-base serve` 后打开 <http://127.0.0.1:8765/chat>，可以与 Admin Agent 和所有已安装 repo Agent 多轮对话。支持历史、实时文本与工具卡片、断线恢复、停止回复、模型/推理强度选择以及会话产物下载；repo 沿用固定 skills 和常驻 MCP。
-
-会话由原生 dsh session 续接，页面刷新或切换对话不会取消生成。原工作台保留在 `/workbench`。设计参考、接口和测试见 [WebChat.md](docs/WebChat.md)。
-
-## Repo 长期安装与资源命名空间
-
-`schema_version: 2` 支持在 `agent.yaml` 或 `Installation.md` 的固定配置块中列出 skills/MCP：同一安装版本共享固定 skills 与依赖，MCP 安装后常驻，任务结束不会停止。每个运行只发现自己 repo 的资源；提示词使用相对路径，安装文档是否依赖本机绝对路径由 Admin 在安装前语义审阅。
-
-已提供财务、库存、研究三个独立示例以及四实例真实 dsh 验收。安装、常驻服务管理、安装前审阅与复现方法见 [RepoInstallation.md](docs/RepoInstallation.md)。
-
-## 共享 MCP 服务（schema_version: 3）
-
-v3 把共享 MCP 从 Agent repo 中分离：`kind: mcp-service` 的服务包按固定 commit 安装、验证、发布到本机目录；Agent 用 `services` 显式声明依赖，由 Admin 绑定后才可使用。两个 Agent 可共用一份部署，停止或卸载其中一个不会停止服务。进程、故障单和显式授权在 <http://127.0.0.1:8765/services> 管理。
-
-典型 admin 意图：
-
-```text
-安装并发布 examples/managed-services/ticket-center-stdio，授权 triage-agent 只查询、ops-agent 查询并订阅。
-```
-
-常用管理工具：`prepare_service_install`、`apply_service_install`、`publish_service`、`bind_agent_service`、`list_services`、`get_service_incident`、`prepare_knowledge_migration`。服务发布不代表任何 Agent 已获授权；工具目录、项目范围和撤权都在服务端校验。
-
-本地统一验收（隔离状态、虚构凭据，含真实 dsh + 本地模型网关、故障恢复、看护和知识库迁移）：
+网页使用：
 
 ```sh
-UV_CACHE_DIR=/tmp/agent-base-uv-cache uv run --frozen python scripts/validate_managed_services.py
+.venv/bin/agent-base serve
 ```
 
-清单字段、状态机、监督/看护默认值、知识库迁移和管理页说明见 [ManagedServices.md](docs/ManagedServices.md)。
+打开 <http://127.0.0.1:8765/>。已有平台账号从 `/login` 登录；首次管理员在本机通过 `agent-base control init` 初始化。
 
-## MCP 发现与多 Agent 接入
+## 选择工作方式
 
-平台把全部 MCP（repo 命名空间、共享部署、外部登记、内置知识库）统一为 Streamable HTTP 端点，并通过发现 API 暴露清单与接入方法：
+| 需要做什么 | 入口 | 得到什么 |
+| --- | --- | --- |
+| 安装、运行或管理仓库 | Admin 对话 | 安装信息、run_id、状态与产物 |
+| 连续探索与追问 | `/chat` | 独立会话与原生 CLI 上下文 |
+| 一次性或周期执行 | `/cron` | 固定安装版本的计划及运行报告 |
+| 管理共享 MCP | `/services` | 部署、发布、授权与故障状态 |
+| 维护项目知识 | `/knowledge` | 正式知识、投稿审批与版本 |
+| 看资源与队列 | `/dashboard` | 本机只读运行快照 |
 
-- `GET /api/mcp`：全部 MCP 的端点、状态、工具目录、鉴权方式与使用约束（凭据只给引用，不返回值）。
-- `GET /api/mcp/config?agent=dsh|opencode|claude-code`：生成对应客户端的可合并配置片段（opencode `mcp.<name>.type=remote` + `{env:VAR}`、Claude Code `mcpServers.<name>.type=http` + `${VAR}`、dsh patch insert 行）。
-- `POST /api/mcp/grants`：为外部 Agent 签发会话授权（TTL 60s–24h），只对已发布、运行中且有启用绑定的共享部署；builtin 知识库按绑定签发，不做发布状态检查。工具/项目范围与绑定存活性仍在网关逐调用校验，解绑立即失效。
-- `GET /.well-known/mcp.json`：标准风格的最小发现文档（name + url + 描述）。
+安装不会自动完成业务任务；网页普通对话不自动执行仓库入口。需要独立产物检查时，提交后台 Run。
 
-repo 命名空间的业务工具必须关联活跃 Run（`X-Agent-Run`），由平台任务自动挂载，外部 Agent 只能浏览其工具目录。CLI 同步提供 `agent-base mcp list` 与 `agent-base mcp config --agent <client>`。
+## 常用文档
 
-## Web / cron 工作调度
+- [文档导航](docs/README.md)：按目标查找指南。
+- [常用规格与问题](docs/Specifications.md)：版本选择、默认值、容量限制、结果含义与排障。
+- [导出自己的 Agent](docs/export-guild.md)：准备角色、安装清单和无人值守入口。
+- [运行契约](docs/RepoContract.md)：任务参数、最终报告与可信验证。
 
-现在支持注册可重复触发的工作，通过 Web、cron、CLI 或 admin MCP 入队，由持久化调度器控制并发。每次运行独立 clone、复制输入到临时目录、创建新 session；产物验证通过后归档并清理目录，超时或失败保留现场。
+当前适用于可信仓库、单机执行。账号与 RBAC 已存在，执行数据仍是全局工作台；目录、venv、命名空间不能替代多租户安全隔离。CodeAgent 仅有基础 print 适配，完整连续会话与内网环境仍需现场验收。
 
-```sh
-.venv/bin/agent-base serve --port 8765
-```
+## 文档维护
 
-本机工作台：<http://127.0.0.1:8765/workbench>。创建测试仓库、注册工作、cron/HTTP 调用和完整生命周期说明见 [Scheduling.md](docs/Scheduling.md)。`serve` 含调度器，无需 Web 时可用 `agent-base worker`。只有注册或触发命令时，需另有常驻调度器负责出队。共享服务监督器和看护巡检也运行在 `serve`/`worker` 循环中。
-
-## 本地示例
-
-```sh
-.venv/bin/python scripts/create_demo.py
-.venv/bin/agent-base admin
-```
-
-create_demo 会把示例复制为独立的本地 Git 仓库并输出绝对路径，保留已存在目录。在对话中说：
-
-```text
-安装并运行刚才输出的本地 Git 仓库，使用默认任务，等待完成并给我产物。
-```
-
-示例真正经过 admin MCP → 后台任务 → 独立 clone → dsh → 业务 MCP 工具 → 报告文件 → Python 检查。不会通过管理员直接写文件来冒充仓库 agent 成功。
-
-## 命令行入口
-
-```sh
-agent-base doctor
-agent-base run <repo-url-or-local-git-path> --task "本次任务" --model <model-id> --effort high
-agent-base install <repo-url-or-local-git-path> --wait
-agent-base start <prepared-run-id> --task "本次任务"
-agent-base list
-agent-base status <run-id>
-agent-base wait <run-id> --seconds 30
-agent-base events <run-id> --after 0
-agent-base cancel <run-id>
-agent-base admin --session another-chat
-agent-base admin --message "列出当前任务"
-```
-
-以上假定已激活 `.venv` 或使用完整可执行路径。`--config config-file.toml` 放在子命令前。每个 run 独立检出 Git SHA；运行中不会跟随远端分支移动。
-
-`run` 默认返回后台任务 ID；`--wait` 最多等待 300 秒，仍未结束时返回当前状态。`start` 只接受 prepared 状态，不会重发运行中、失败或已完成任务。仓库多轮交互通过网页对话提供；单次任务 Run 的自动断点续跑和未知结果重试不是首版功能。
-
-## 仓库约定
-
-最小仓库只需根 `AGENTS.md`，并在提交时给出 task。需要自动安装或额外能力时使用 `agent.yaml`，或 `Installation.md` 中唯一的 agent-base-install 配置块。Markdown 正文不会作为自由 shell 脚本执行。下面保留 v1 兼容示例，repo 长期安装使用 v2。
-
-当前可运行的清单示例：
-
-```yaml
-schema_version: 1
-package:
-  name: report-agent
-  version: 0.1.0
-task:
-  default: 生成 artifacts/report.txt
-environment:
-  lockfile: uv.lock  # 可选，仓库同时提供 pyproject.toml
-installation:
-  steps:
-    - argv: ["${runtime.python}", "${package.root}/setup.py"]
-      timeout_seconds: 60
-tools:
-  local:
-    - name: make_report
-      description: 按输入生成报告
-      argv: ["${runtime.python}", "${package.root}/tools/make_report.py"]
-      input_schema:
-        type: object
-        properties:
-          text: {type: string}
-        required: [text]
-mcp:
-  servers:
-    - id: knowledge
-      transport: stdio
-      argv: ["${runtime.python}", "${package.root}/mcp/server.py"]
-      environment:
-        TOKEN: {from_env: KNOWLEDGE_TOKEN}
-skills:
-  - name: report-writing
-    path: skills/report-writing
-completion:
-  artifacts:
-    - path: artifacts/report.txt
-      required: true
-      min_bytes: 1
-  checks:
-    - argv: ["${runtime.python}", "${package.root}/tools/check_report.py"]
-limits:
-  wall_timeout_seconds: 1800
-```
-
-这个片段说明字段，运行时需仓库实际提供声明的资源。不使用的部分直接省略。可直接参考 [可运行示例](examples/hello-agent/agent.yaml)。
-
-工具接收 stdin JSON：`{"protocol_version":1,"arguments":{...},"context":{"workspace":"...","artifact_dir":"..."}}`，stdout 返回一个 JSON 对象，诊断写 stderr。它们通过原生 `mcp__local__<name>` 工具暴露给 dsh。业务工具不继承名称含 API_KEY/TOKEN/SECRET/PASSWORD 的环境变量；需要认证的外部 MCP 使用显式 `from_env` 引用。生成的 patch 保留环境引用，不把凭据值写入文件。
-
-远程 MCP 使用 `transport: streamable_http`、`url` 和 `headers`，header 也可以用 `{from_env: ENV_NAME}`。stdio/HTTP 连接由 dsh 原生 MCP 插件处理；已通过本地业务 MCP 路径验收，远程服务的身份和协议兼容性需按实际服务测试。dsh 可将可选插件启动失败记录为 warning，故安装收据仅证明资源准备完成，不证明所有外部 MCP 已实际加载；运行错误和日志仍需核对。
-
-旧 v1 skills 在启动前读取冻结的 SKILL.md 并附加到任务，`uv.lock` 环境装到 run 专属环境。v2 使用固定安装环境、skill 链接和 read_skill，供同一安装版本的实例共享。两者都不模拟其他 CLI 的 slash 技能发现，也不按需动态安装技能；包源与验证脚本保留冻结副本，工作区修改不会替换验证标准。
-
-## 状态与并发
-
-正常路径：queued → preparing → running → verifying → succeeded。只安装时终态为 prepared。其他终态：failed、cancelled、timed_out、interrupted。
-
-默认最多两个活动任务，SQLite 原子领取，排队 FIFO，每个任务独立进程、repo、环境和 DSH_HOME。安装脚本和仓库任务都支持取消及超时；终止运行器时同时清理其受管进程组。监督进程意外消失会记为 interrupted 并处理已知子进程，不会自动重复未知结果的任务。
-
-产物检查通过后复制到受管 artifacts 目录，记录大小和 SHA-256。没有独立检查命令时标记 `structural_only`；有命令且通过时标记 `checks_passed`，这不等于证明任意业务结论正确。
-
-本版本面向本人/团队维护的可信仓库。独立目录/venv 不能隔离任意恶意 Python 或 MCP 代码，不提供公网多租户服务。任务可能执行声明的安装代码和 CLI 原生命令。
-
-## dsh 与内网 CodeAgent
-
-本地 dsh 固定 npm `@deepseek-ai/dsh@0.2.1-rc.5`，可执行文件在 `.runtime/dsh/node_modules/.bin/dsh`。该发布版的 headless 只有 session/final 文本事件，final 没有主干新增的 reason/sessionId；适配器检查进程退出码 0、opening session 和唯一 final，记录 `legacy_final_exit_code`，不会伪造 finish_reason。
-
-model/effort 通过 invocation patch 的 agent-default-model 传递。权限模式通过该版本的环境和 approval patch 设置，未使用主干才新增的 CLI flags。admin 使用原生 `--session-id` 保持对话。
-
-CodeAgent 在 [engines.py](src/agent_base/engines.py) 保留了基于旧 MVP 的 print-mode 基本调用。可用 [配置模板](config/codeagent.example.toml) 准备内网单次推理探测，并将并发设为 1。**尚未内网验收，也未完成 MCP、Admin 和网页会话适配**；有 MCP/业务工具的清单会明确拒绝。完整迁移需同时调整 service、repo_runtime、admin 和 conversations 的运行时调用边界，步骤见 [迁移指南](docs/CODEAGENT_MIGRATION.md)。
-
-参考资料：[dsh CLI](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/cli)、[headless](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/bundle/headless)、[MCP 插件](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/mcp/mcp-client)。发布版行为以本地安装及验收为准。
-
-## 测试
-
-```sh
-uv run --frozen pytest -q
-```
-
-自动测试使用 fake dsh，覆盖任务全流程、Git 固定版本、安装后启动、并发、排队、取消、超时、失败产物、原生会话续接、v3 服务安装/发布/绑定/监督/看护/知识迁移，并通过官方 Python MCP 客户端连接真实管理/业务 MCP server。浏览器回归在 `frontend` 目录执行 `npx playwright test`。阶段二统一验收脚本见上一节；真实 dsh 与本地模型网关链路、现场待验收项记录在 [VALIDATION.md](docs/VALIDATION.md)。
+面向人的指南保留操作、示例、规格、风险和验收结论。文件职责、强依赖和实现约束由 [AOCI 索引](aoci.txt) 维护，修改实现时仍需核对源码。[架构与维护约定](docs/ARCHITECTURE.md) 保留系统边界和设计决策；历史测试证据见 [验收记录](docs/VALIDATION.md)。
