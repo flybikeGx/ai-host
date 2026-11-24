@@ -9,6 +9,7 @@
 | 老仓库兼容 | schema_version:1，每次 Run 安装资源 |
 | Repo 长期安装 | schema_version:2，固定 skills、环境和常驻私有 MCP |
 | 跨 Agent 共享服务 | schema_version:3，服务部署、发布、Agent 绑定分别管理 |
+| 第一方 MCP 包 | `first_party/<id>/mcp.yaml`，schema_version:1、kind:mcp-package；目录名 = id 中的 `-` 换 `_` |
 | 安装机器配置 | 根 agent.yaml 或 Installation.md 唯一 agent-base-install 块，不能双写 |
 | 服务传输 | stdio、streamable_http；外部服务仅经本机接入层代理 |
 | 安装版本 | 固定 commit，更新源码后需重新安装 |
@@ -39,6 +40,8 @@
 | 服务启动宽限 | 默认 60 秒 | 示例/部署配置可能覆盖为 30 秒 |
 | 自动恢复 | 默认 10 分钟最多 3 次 | 退避 30/60/120 秒；仍受维护、排空和授权约束 |
 | 看护巡检 | 默认关闭，启用后默认间隔 300 秒 | 确定性监督不依赖看护模型可用 |
+| 第一方 MCP 安装状态 | `data/mcp/installations.json` | 缺省条目按清单 `installation.default` 推导；停用/卸载默认保留数据根 |
+| 包页面挂载 | 第一方 `spa-module`、第三方 `static-iframe` | 页面与导航由清单和启用状态决定；停用后路由 404 |
 
 实现依据：[配置](../src/agent_base/config.py)、[队列和输入](../src/agent_base/scheduler.py)、[对话](../src/agent_base/conversations.py)、[报告](../src/agent_base/reports.py)、[服务清单](../src/agent_base/manifests.py)、[知识库](../src/agent_base/knowledge.py)。变更限制时同步此表。
 
@@ -55,6 +58,7 @@
 | 失败或 interrupted 自动重试？ | 不会，先核对结果和副作用，再决定新任务 |
 | 能让多个不可信用户共用吗？ | 当前不具备多租户强执行隔离；账号/RBAC 不能代替沙箱 |
 | 外部服务能重启吗？ | 平台只管理本机路由，不管理远端进程 |
+| 安装/启用 MCP 包就授权 Agent 吗？ | 不；工具授权仍以显式绑定或知识 grant 为准 |
 | 修改绑定就收紧所有旧 grant？ | 不能这样假设；旧 grant 未比较绑定修订号，撤权需用解绑流程 |
 
 ## 常见故障
