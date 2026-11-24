@@ -6,7 +6,7 @@
 
 ## 1. 边界
 
-- 本阶段的「发布」指登记到本机服务目录并授权给指定 Agent，不推送 Git、不默认开放公网。
+- 本阶段的「发布」指登记到本机服务目录；授权需另行绑定 Agent，不推送 Git、不默认开放公网。
 - 托管对象是 MCP 服务包（`kind: mcp-service`）或用户维护的外部 HTTP MCP。平台不接管外部机器的进程。
 - 不实现下载已发布 Agent、临时本地运行目录、dsh GUI 自动连接、集群高可用和多租户身份平台。
 - 目录、绑定、部署数据仍在本机 `.agent-base` 下；不是安全沙箱，适用于可信团队的单机环境。
@@ -85,26 +85,9 @@ tasks:
 
 `services` 是申请，不是授权：实际可用工具和数据范围来自平台绑定。v3 Agent 不再声明 repo 私有 `mcp.servers`；旧 v1/v2 语义保持不变。声明是精确的：`services: []` 或缺少该字段表示不使用任何共享服务，不会回退为平台上的全部绑定；只有 Admin 兼容视图可以列出全部绑定。
 
-## 4. 对象与状态
+## 4. 状态怎么看
 
-| 对象 | 含义 |
-| --- | --- |
-| `service_id` | 稳定逻辑能力，如 `ticket-center` |
-| `revision_id` | 固定 commit + 组件路径 + 清单摘要的不可变版本 |
-| `deployment_id` | 某环境/数据范围的一份部署，管理生命周期与持久数据 |
-| `generation` | 一次启动/切换代际，与网关 PID/出生时间一起核对 |
-| Binding | Agent 稳定身份 → 部署 → alias/契约/工具/数据范围，带修订号 |
-| Operation | 持久 `operation_id`、计划、幂等键、状态、错误与收据 |
-| Incident | 按部署 + 代际归并的故障单，汇总受影响 Agent |
-
-部署分别保存：
-
-- 期望状态 `desired_state`：`running` / `stopped` / `removed`
-- 发布状态 `publish_state`：`unpublished` / `published` / `withdrawn`
-- 观测状态 `observed_state`：`unknown` / `starting` / `healthy` / `degraded` / `unhealthy` / `stopped`，附检查时间与分层证据
-- 验证等级 `verification`：`not_verified` / `protocol_verified` / `business_verified`
-
-「进程存活」「MCP 协议可用」「业务探针通过」是三层证据；只有完成声明的只读业务探针才会标记 `business_verified`。
+服务版本固定源码；部署有独立持久数据和活动代际。期望状态、发布状态、观测健康分别显示，不能互相替代。protocol_verified 表示协议通过，business_verified 还要求声明的只读业务探针通过。
 
 ## 5. Admin 管理工具
 
@@ -134,45 +117,17 @@ tasks:
 - 凭据缺项、组件/清单不匹配、计划过期或来源 commit 变化会明确失败，不会静默换版本。
 - 安装/停止/重启/恢复都经过同一部署锁与代际检查；重复请求用幂等键复用同一操作。
 
-## 6. 发布、绑定与运行入口
+## 6. 发布与授权
 
-- 发布要求部署有活动健康代际且验证等级至少 `protocol_verified`；`withdrawn` 不能直接重新发布，需重新验证。
-- 绑定保存 alias、契约、工具、数据范围和修订号；撤权立即使新调用失败，旧的未用授权失效。
-- 普通共享服务的数据范围使用显式 `scope: {"projects": [...]}` 项目白名单；不支持的非空结构在绑定时拒绝。网关读取工具的完整 input schema：工具没有项目参数、调用未提供项目参数、项目参数为空集合/空字符串或值超出白名单时都拒绝，不会放行成全库查询。知识库使用自己的项目/投稿范围字段。
-- 普通 Run、cron、网页 repo 对话和获授权的 Admin 业务访问共用 [service_resolver.py](../src/agent_base/service_resolver.py)：同一份解析结果生成 dsh patch 和 `.agent/resources.json`，不出现「目录声称可用但客户端未挂载」。
-- 凭据只经进程环境传给连接层，不进入提示词、资源目录或日志。
-- 托管和外部接入层都在服务端校验授权、绑定状态、任务/轮次存活、工具范围和项目范围；`scope.projects` 对 `project`/`project_id`/`namespace` 等参数逐次校验，范围外调用被拒绝。
-- stdio 网关缓存并透传完整工具定义（描述、input/output schema 等）和完整 `CallToolResult`（含 `isError`/`structuredContent`）；HTTP 代理的 `tools/list` 按绑定过滤，目录与实际调用范围一致。
-- 必需服务缺失或契约不匹配时，任务在产生业务副作用前失败；可选服务不可用时提示本轮不要编造结果，不自动换源。
-- Agent 停止/更新/卸载只影响自己的绑定，不停止共享部署。
-- 重新安装同一部署的新 commit 时，候选只在安装步骤成功后写入活动指针；安装期间公共 start/restart/stop 和另一个安装会明确冲突，不会提前激活未完成安装的候选。之后排空旧代际、核对活动 revision/config 身份并启动新代际；只有新代码实际启动并通过验证才报告成功。存在未排空的在途调用时拒绝切换，并恢复原 revision/config/代际与期望状态，旧调用继续完成；只有本操作创建的网关会被清理；执行器崩溃后恢复流程会读取计划中的活动快照并恢复旧代际。相同 revision 和配置的重复安装复用现有代际。
-- 安装准入在同一个数据库写事务内完成幂等键查重、活动安装检查和操作创建，跨进程的不同请求只有一个可进入安装。相同幂等键始终复用原操作，包括已完成请求的重试；其他部署可独立提交。活动安装查询不受近期历史列表条数限制。
+发布要求健康活动代际且至少 protocol_verified。撤销发布后需重新验证，不能直接重新发布。绑定指定 Agent、alias、工具白名单与数据范围；撤权使新调用失败。普通项目范围使用 scope.projects 白名单，缺失、空值或越界的项目参数会拒绝。
 
-## 7. 监督器与看护 Agent
+升级前核对在途调用，按计划排空与切换；失败保留证据，不自动重试未知安装步骤。同一幂等键复用原操作。Agent 升级或停止不停止共享部署。
 
-确定性监督器运行在 `serve` / `worker` 内，不依赖模型：
+## 7. 监督与恢复
 
-- 默认 30 秒探测、5 秒超时；连续 3 次失败进入 `unhealthy`，连续 2 次成功恢复 `healthy`；启动宽限期由部署配置。
-- 恢复默认 10 分钟内最多 3 次，退避 30/60/120 秒。`restart_safe` 是维护者声明，仍受部署授权、预算、维护状态和在途调用约束。
-- 主动 `stopped`、维护中、`withdrawn` 的服务不会被自动复活；外部服务只探测/报告，不远程重启。
-- 存在结果未知的非幂等调用、无法安全排空或安装/升级占用时记录故障单并升级，不强制重启。
-- 故障单按部署 + 代际归并，恢复后先进入 `monitoring`，持续健康后附证据关闭。
-- 监督器心跳过期时管理页显示 `stale`，不继续展示历史 `healthy`。
+确定性监督运行于 serve/worker，探测进程、协议和业务健康；恢复受预算、退避、维护状态和在途调用约束。主动停止或撤销发布的部署不会被复活；外部服务只报告故障。
 
-看护 Agent 使用专用身份和受限 MCP 工具（`services_overview`、`service_detail`、`read_service_log`、`probe_service`、`restart_service`、`list_incidents`、`record_incident_note`、`close_incident`、`escalate_incident`），通过现有 dsh 运行入口执行巡检。巡检启动时会禁用 dsh 默认可扩展工具行（fs/搜索、bash/pwsh、jobs、skill、subagent、workflow、web、goal、todo、plan-mode、MCP 资源目录等），模型可见目录只保留 `mcp__guardian__*`；新增默认工具会让真实模型目录回归失败，而不是静默扩大权限。重启仍由服务端校验 `restart_safe`、`allow_guardian_restart`、预算与在途调用；没有宿主 shell、模型或平台管理凭据。修改凭据、升级版本、数据修复只能形成计划并升级。
-
-配置：
-
-```toml
-[guardian]
-enabled = true
-interval_seconds = 300
-model = "deepseek-flash"     # 可选，默认沿用 runtime
-effort = "high"              # 可选
-timeout_seconds = 600        # 可选
-```
-
-模型不可用、看护进程退出或巡检超时不会停止监督器；管理页显示看护 `failed` / `stale`。故障提示默认留在平台，不自动外发。
+看护默认关闭。启用后可诊断、记录故障并在已授权策略内重启；没有宿主 shell 或扩大权限的能力。模型故障不停止确定性监督。默认值见 [规格速查](Specifications.md)。
 
 ## 8. 管理页
 
@@ -198,7 +153,7 @@ timeout_seconds = 600        # 可选
 
 - `prepare_knowledge_migration` 只读生成固定计划：原实例 PID/端口/状态、监督归属、数据目录、项目、文档/版本/投稿/审计摘要、旧绑定到平台 Agent 身份的映射、风险与 `plan_digest`。
 - `apply_knowledge_migration` 在部署锁内执行：用 SQLite 在线备份 API 生成快照并核对摘要；默认复制到 `deployments/<id>/data`，不停止或改写来源数据；登记内置知识部署、启动唯一监督者、真实 MCP 验证、映射平台绑定并按计划发布。
-- 迁移默认保留原知识库实例与数据。`in_place` 会先停止兼容管理器再在同一数据目录启动部署代际，必须由管理员明确确认。
+- 迁移复制保留来源数据，但当前实现可能短暂停止并恢复健康的旧实例以取得快照；正式业务迁移需先确认停机影响并获得授权。`in_place` 会先停止兼容管理器再在同一数据目录启动部署代际，必须由管理员明确确认。
 - 来源在计划后变化、未映射的旧主体、同一数据目录已有其他监督归属都会被拒绝；重复执行可复用已核对的副本，不会启动第二个实例。
 - `verify_knowledge_migration` 核对目标数据库完整性、迁移记录是否完整、监督者数量和数据目录分离；`rollback_knowledge_migration` 停止迁移后的部署并保留数据，就地接管会恢复原实例。
 - 旧 v1/v2 知识绑定继续走兼容路径；一旦迁移并完成平台绑定，新路径通过 `ServiceResolver` 挂载共享部署，不会重复挂载。
