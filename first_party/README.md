@@ -19,4 +19,6 @@ first_party/
 - 每个包根目录一个 `mcp.yaml`；以下划线开头的目录不会被 `agent-base mcp packages` 发现。
 - 迁移使用 `git mv` 保留历史，遵循 [MCP_PACKAGE.md](../docs/MCP_PACKAGE.md) 的安装/停用/数据边界。
 
-D1 只落地骨架、模板和清单解析器；`knowledge/`、`file_hub/` 在 D2/D3 迁移前只有占位说明，没有可加载的清单。
+- D1 只落地骨架、模板和清单解析器；`knowledge/`、`file_hub/` 在 D2/D3 迁移前只有占位说明，没有可加载的清单。
+- `info_board/` 已按冻结契约实现（AIHO-32）：`id: info-board`、页面 `/info`、`installation.default: available`；
+  使用、工具与运维说明见 [信息台](info_board/docs/README.md)。

@@ -1,0 +1,55 @@
+schema_version: 1
+kind: mcp-package
+
+id: info-board
+title: 信息台
+version: 1.0.0
+contract: info-board/v1
+description: 全局平铺的 Markdown 信息发布、浏览、修改与删除
+
+service:
+  transport: streamable_http
+  runtime:
+    argv:
+      - ${runtime.python}
+      - ${package.root}/server.py
+      - --port
+      - ${service.port}
+      - --data
+      - ${service.data}
+    endpoint_path: /mcp
+    environment: {}
+  health:
+    path: /health
+    expected_tools: [info_create, info_list, info_get, info_update, info_delete]
+    probe_tool:
+      tool: info_list
+      arguments: {limit: 1}
+    startup_timeout_seconds: 30
+  data:
+    dir: info-board
+    retention: keep
+  operations:
+    restart_safe: true
+    session_sharing: safe
+
+frontend:
+  mount: spa-module
+  route: /info
+  navigation: {label: 信息台, icon: newspaper, order: 40}
+  entry: frontend/src/index.jsx
+  requires: [info.read]
+  standalone: false
+
+installation:
+  default: available
+  steps: []
+  upgrade: restart
+  uninstall: keep-data
+  requires_agent_base: ">=0.1.0"
+
+permissions:
+  anonymous: false
+  session: same-origin-cookie
+  api: [info.read, info.write]
+  service_tools: [info_create, info_list, info_get, info_update, info_delete]
