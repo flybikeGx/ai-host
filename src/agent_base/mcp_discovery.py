@@ -48,8 +48,36 @@ class MCPDiscovery:
 
     # -- inventory ------------------------------------------------------------
     def inventory(self) -> dict:
-        servers = [*self._repo_servers(), *self._deployment_servers(), *self._legacy_knowledge()]
+        servers = [*self._repo_servers(), *self._deployment_servers(), *self._legacy_knowledge(),
+                   *self._info_board()]
         return {"servers": servers, "count": len(servers), "generated_at": time.time()}
+
+    def _info_board(self) -> list[dict]:
+        from .info_board_mcp import TOOLS
+        from .info_board_service import InfoBoardService
+        service = InfoBoardService(self.config)
+        if not service.enabled:
+            return []
+        state = service.status()
+        status = {"healthy": "running", "down": "stopped", "disabled": "disabled"}.get(
+            state["state"], "unhealthy")
+        return [{
+            "id": "info-board",
+            "name": "共享信息台",
+            "kind": "info_board",
+            "service_id": "info-board",
+            "transport": "streamable_http",
+            "url": state.get("endpoint") if status == "running" else None,
+            "status": status,
+            "stable_endpoint": False,
+            "tools": [tool["name"] for tool in TOOLS],
+            "auth": {"mode": "platform_grant",
+                     "credential": {"type": "platform", "note": "平台任务运行时自动签发短期授权"}},
+            "connectable": False,
+            "reason": "信息台由平台任务运行时自动挂载；外部客户端暂无独立会话授权入口",
+            "usage": {"headers": {"Authorization": "Bearer <运行时短期授权>"},
+                      "notes": "人类通过 /info 只读浏览；所有信息来源全局可见"},
+        }]
 
     def _repo_servers(self) -> list[dict]:
         from .repositories import Repositories

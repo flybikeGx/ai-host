@@ -22,6 +22,9 @@ def config(tmp_path):
     from agent_base.knowledge_service import KnowledgeService
     if (configuration.data / 'knowledge/service.json').exists():
         KnowledgeService(configuration).stop()
+    from agent_base.info_board_service import InfoBoardService
+    if (configuration.data / 'info-board/service.json').exists():
+        InfoBoardService(configuration).stop()
 
 
 @pytest.fixture

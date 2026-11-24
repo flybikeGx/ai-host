@@ -327,6 +327,11 @@ class Conversations:
                     self.store.update(run_id, status="running")
                 from .knowledge_service import attach
                 actor = 'admin' if chat['target'] == 'admin' else 'repo:' + item['repo_id']
+                from .info_board_service import attach as attach_info_board
+                prompt = attach_info_board(self.config, patch, env, actor,
+                                           {'turn_id': turn_id, 'run_id': run_id,
+                                            'installation_id': chat['target']},
+                                           deadline, workspace) + prompt
                 prompt = attach(self.config, patch, env, actor, {'turn_id': turn_id, 'run_id': run_id, 'installation_id': chat['target']}, deadline, workspace) + prompt
                 prompt_file = root / "prompt.txt"
                 prompt_file.write_text(prompt, encoding="utf-8")

@@ -304,6 +304,17 @@ class Service:
                     patch = dsh_patch(runtime, root, package=root / "package", workspace=workspace, manifest=manifest, python=python)
                 from .knowledge_service import attach
                 actor = 'repo:' + repositories.get(spec['installation_id'])['repo_id'] if spec.get('installation_id') else None
+                from .info_board_service import attach as attach_info_board
+                info_instructions = attach_info_board(
+                    self.config, patch, env, actor,
+                    {'run_id': run_id, 'installation_id': spec.get('installation_id')},
+                    deadline, workspace)
+                if info_instructions:
+                    prompt.write_text(info_instructions + prompt.read_text(encoding='utf-8'), encoding='utf-8')
+                    contract_file = root / 'prompt-contract.json'
+                    contract = json.loads(contract_file.read_text())
+                    contract['prompt_sha256'] = hashlib.sha256(prompt.read_bytes()).hexdigest()
+                    contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
                 if actor:
                     instructions = attach(self.config, patch, env, actor, {'run_id': run_id, 'installation_id': spec['installation_id']}, deadline, workspace)
                     if instructions:

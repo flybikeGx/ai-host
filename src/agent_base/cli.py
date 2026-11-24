@@ -26,6 +26,8 @@ def main():
     opening.add_argument('--port', type=int, default=8765)
     knowledge = commands.add_parser('knowledge', help='管理集中式 Knowledge MCP')
     knowledge.add_argument('knowledge_action', choices=['status','start','stop','restart'])
+    info = commands.add_parser('infoboard', help='管理共享信息台 MCP')
+    info.add_argument('infoboard_action', choices=['status','start','stop','restart'])
     control = commands.add_parser('control', help='治理面：域/用户/角色/RBAC/审计控制面')
     control_actions = control.add_subparsers(dest='control_action', required=True)
     control_init = control_actions.add_parser('init', help='引导：种子内置角色 + 创建 admin 平台管理员')
@@ -169,6 +171,17 @@ def main():
                 result = service.status()
             emit(result)
             return
+        if args.action == 'infoboard':
+            from .info_board_service import InfoBoardService
+            service = InfoBoardService(config)
+            if args.infoboard_action in {'stop','restart'}:
+                result = service.stop()
+            if args.infoboard_action in {'start','restart'}:
+                result = service.ensure(explicit=True)
+            if args.infoboard_action == 'status':
+                result = service.status()
+            emit(result)
+            return
         if args.action == 'control':
             import secrets
             from .governance.service import Governance
@@ -246,12 +259,18 @@ def main():
             from .scheduler import Scheduler
             scheduler = Scheduler(config)
             if args.action == "worker":
+                import logging
                 from .knowledge_service import KnowledgeService
+                from .info_board_service import InfoBoardService
                 try:
                     KnowledgeService(config).ensure()
                 except ValueError:
-                    import logging
                     logging.exception('Knowledge MCP unavailable')
+                try:
+                    if InfoBoardService(config).enabled:
+                        InfoBoardService(config).ensure()
+                except ValueError:
+                    logging.exception('Info Board MCP unavailable')
                 if args.once:
                     emit(scheduler.tick())
                 else:

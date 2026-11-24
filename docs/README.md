@@ -13,6 +13,7 @@
 | 用 CLI/API 注册工作 | [工作调度](Scheduling.md) |
 | 安装、发布与授权共享 MCP | [共享服务](ManagedServices.md) |
 | 管理正式知识与审批投稿 | [知识库](Knowledge.md) |
+| 发布与浏览 Markdown 信息 | [信息台](InfoBoard.md) |
 | 理解指标与未知值 | [仪表盘](Dashboard.md) |
 | 迁入企业内网 | [CodeAgent 迁移](CODEAGENT_MIGRATION.md) |
 | 同步 Git 与离线交接 | [Git 指南](GIT_GUIDE.md) |
