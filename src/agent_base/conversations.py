@@ -328,6 +328,9 @@ class Conversations:
                 from .knowledge_service import attach
                 actor = 'admin' if chat['target'] == 'admin' else 'repo:' + item['repo_id']
                 prompt = attach(self.config, patch, env, actor, {'turn_id': turn_id, 'run_id': run_id, 'installation_id': chat['target']}, deadline, workspace) + prompt
+                from .mcp_runtime import attach_packages
+                prompt = attach_packages(self.config, patch=patch, env=env, actor=actor,
+                                         workspace=workspace, deadline=deadline) + prompt
                 prompt_file = root / "prompt.txt"
                 prompt_file.write_text(prompt, encoding="utf-8")
                 output = root / "runtime.jsonl"

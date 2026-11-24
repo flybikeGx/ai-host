@@ -72,6 +72,9 @@ class Admin:
             instructions = ServiceResolver(self.config).attach(
                 patch=patch, env=env, workspace=self.workspace, manifest=None,
                 installation=None, actor="admin", deadline=deadline) + instructions
+            from .mcp_runtime import attach_packages
+            instructions = attach_packages(self.config, patch=patch, env=env, actor="admin",
+                                           workspace=self.workspace, deadline=deadline) + instructions
             task.write_text(instructions + (PROJECT / "AGENTS.md").read_text(encoding="utf-8") + "\n\n用户本轮请求：\n" + text, encoding="utf-8")
             stopped = [False]
             old = signal.signal(signal.SIGINT, lambda *_: stopped.__setitem__(0, True))

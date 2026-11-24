@@ -103,6 +103,13 @@ def main():
     mcp_config = mcp_commands.add_parser("config")
     mcp_config.add_argument("--agent", default="opencode", choices=["dsh", "opencode", "claude-code"])
     mcp_commands.add_parser("packages", help="列出 first_party 包清单、安装/启用状态与未加载占位目录")
+    for name in ("install", "enable", "disable", "uninstall", "status"):
+        sub = mcp_commands.add_parser(name, help={"install": "安装并启动第一方 MCP 包",
+                                                  "enable": "启用并启动第一方 MCP 包",
+                                                  "disable": "停用并停止第一方 MCP 包",
+                                                  "uninstall": "移除安装记录并停止服务（默认保留数据）",
+                                                  "status": "查看第一方 MCP 包状态"}.get(name))
+        sub.add_argument("package_id")
     mcp_validate = mcp_commands.add_parser("validate", help="校验一个包或 first_party 根目录的清单（只读）")
     mcp_validate.add_argument("path", nargs="?", help="包目录、mcp.yaml 或 first_party 根目录；缺省为仓库 first_party")
     register_external = service_commands.add_parser("register-external")
@@ -275,6 +282,12 @@ def main():
                 except ValueError:
                     import logging
                     logging.exception('Knowledge MCP unavailable')
+                from .mcp_runtime import ensure_enabled_packages
+                try:
+                    ensure_enabled_packages(config)
+                except Exception:
+                    import logging
+                    logging.exception('First-party MCP packages unavailable')
                 if args.once:
                     emit(scheduler.tick())
                 else:
@@ -401,6 +414,32 @@ def main():
                                                headers=headers, owner=args.owner))
             return
         if args.action == "mcp":
+            if args.mcp_action in {"install", "enable", "disable", "uninstall", "status"}:
+                from .mcp_packages import Installations
+                from .mcp_runtime import PackageRuntime, registry
+                found = registry(config).packages.get(args.package_id)
+                if found is None:
+                    raise ValueError(f"未知 MCP 包：{args.package_id}")
+                installations = Installations(config.data / "mcp")
+                runtime = PackageRuntime(config, found)
+                if args.mcp_action == "status":
+                    emit({**runtime.status(), "installation": installations.effective(found).__dict__})
+                    return
+                if args.mcp_action == "install":
+                    installations.install(found)
+                    service = runtime.ensure(explicit=True)
+                elif args.mcp_action == "enable":
+                    installations.enable(found)
+                    service = runtime.ensure(explicit=True)
+                elif args.mcp_action == "disable":
+                    installations.disable(found)
+                    service = runtime.stop()
+                else:
+                    installations.uninstall(found)
+                    service = runtime.stop()
+                emit({"package": found.id, "installation": installations.effective(found).__dict__,
+                      "service": service})
+                return
             if args.mcp_action == "packages":
                 from .mcp_packages import PackageRegistry
                 emit(PackageRegistry(PROJECT / "first_party", config.data / "mcp").summary())

@@ -312,6 +312,16 @@ class Service:
                         contract = json.loads(contract_file.read_text())
                         contract['prompt_sha256'] = hashlib.sha256(prompt.read_bytes()).hexdigest()
                         contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
+                from .mcp_runtime import attach_packages
+                package_instructions = attach_packages(
+                    self.config, patch=patch, env=env, actor=actor or 'admin',
+                    workspace=workspace, deadline=deadline)
+                if package_instructions:
+                    prompt.write_text(package_instructions + prompt.read_text(encoding='utf-8'), encoding='utf-8')
+                    contract_file = root / 'prompt-contract.json'
+                    contract = json.loads(contract_file.read_text())
+                    contract['prompt_sha256'] = hashlib.sha256(prompt.read_bytes()).hexdigest()
+                    contract_file.write_text(json.dumps(contract, ensure_ascii=False, indent=2))
                 args = dsh_command(runtime, patch)
             else:
                 if manifest.get("tools", {}).get("local") or manifest.get("mcp", {}).get("servers") or manifest.get("services"):

@@ -105,6 +105,12 @@ def create_app(config, *, background=True):
             except ValueError:
                 import logging
                 logging.exception('Knowledge MCP unavailable; management UI remains accessible')
+            from .mcp_runtime import ensure_enabled_packages
+            try:
+                app.state.packages = await asyncio.to_thread(ensure_enabled_packages, config)
+            except Exception:
+                import logging
+                logging.exception('First-party MCP packages unavailable; management UI remains accessible')
             thread.start()
             dashboard.start()
         yield
@@ -155,6 +161,10 @@ def create_app(config, *, background=True):
     register_services(app, config, api)
     from .mcp_discovery import register as register_mcp_discovery
     register_mcp_discovery(app, config, api)
+    # Manifest-driven first-party packages: page routes, navigation data and
+    # package human APIs. Unknown/broken packages are skipped, never fatal.
+    from .mcp_runtime import register_web as register_packages
+    app.state.mcp_packages = register_packages(app, config, api)
     static = Path(__file__).parent / "static" / "chat"
     if (static / "assets").is_dir():
         app.mount("/chat/assets", StaticFiles(directory=static / "assets"), name="chat-assets")

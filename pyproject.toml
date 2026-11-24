@@ -16,4 +16,7 @@ agent-base = "agent_base.cli:main"
 dev = ["pytest>=8,<10"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "first_party"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_base", "first_party"]

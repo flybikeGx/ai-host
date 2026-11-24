@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {ArrowDown, ArrowUp, Archive, BookOpen, Bot, Check, ChevronDown, ChevronRight, Circle, Clock3, Copy, Gauge, ExternalLink, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, RefreshCw, Send, Server, ShieldCheck, SlidersHorizontal, Square, Terminal, User, X} from 'lucide-react';
+import {ArrowDown, ArrowUp, Archive, BookOpen, Bot, Check, ChevronDown, ChevronRight, Circle, Clock3, Copy, Gauge, ExternalLink, KeyRound, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageSquare, MoreHorizontal, Newspaper, PanelLeftClose, Pencil, Plus, RefreshCw, Send, Server, ShieldCheck, SlidersHorizontal, Square, Terminal, User, X} from 'lucide-react';
 import './style.css';
 import './cron.css';
 import CronPage from './CronPage';
@@ -11,8 +11,12 @@ import KnowledgePage from './KnowledgePage';
 import ServicesPage from './ServicesPage';
 import AuthShell from './AuthShell';
 import {api} from './api';
+import {mcpModules} from './mcp-registry.generated';
 
-const routeView=()=>location.pathname==='/chat'?'chat':location.pathname==='/cron'?'cron':location.pathname==='/knowledge'?'knowledge':location.pathname==='/services'?'services':'dashboard';
+const moduleRoute=path=>mcpModules.find(item=>item.route===path);
+const moduleViews=new Map(mcpModules.map(item=>[item.id,React.lazy(item.load)]));
+const moduleIcons={newspaper:Newspaper};
+const routeView=()=>{const module=moduleRoute(location.pathname);if(module)return 'mcp:'+module.id;return location.pathname==='/chat'?'chat':location.pathname==='/cron'?'cron':location.pathname==='/knowledge'?'knowledge':location.pathname==='/services'?'services':'dashboard';};
 const busy = status => ['queued','running'].includes(status);
 const statusText = {queued:'排队中',running:'正在回复',succeeded:'已完成',failed:'执行失败',cancelled:'已停止',timed_out:'已超时',interrupted:'已中断',idle:'就绪'};
 const initials = name => name==='Admin Agent'?'A':(name||'Agent').slice(0,1).toUpperCase();
@@ -56,6 +60,7 @@ function App({session,onLogout}){
   const [showSettings,setShowSettings]=useState(false),[mobileNav,setMobileNav]=useState(false),[archived,setArchived]=useState(false),[search,setSearch]=useState('');
   const [draft,setDraft]=useState(''),[model,setModel]=useState(''),[effort,setEffort]=useState('high'),[connected,setConnected]=useState(false),[copied,setCopied]=useState(null),[editing,setEditing]=useState(false),[titleDraft,setTitleDraft]=useState('');
   const [nearBottom,setNearBottom]=useState(true);
+  const [packageNav,setPackageNav]=useState(mcpModules);
   const agentList=useRef(null);
   const viewport=useRef(null),textarea=useRef(null),cursor=useRef(0),activeId=useRef(selected),autoScroll=useRef(true),pending=useRef(null),latestToken=useRef(token);
   latestToken.current=token;activeId.current=selected;
@@ -71,6 +76,10 @@ function App({session,onLogout}){
     setTargets(catalog.targets);setDefaults(catalog.defaults);setChats(list);setModel(old=>old||catalog.defaults.model);
   },[token,archived]);
   useEffect(()=>{reload().catch(reportError);const timer=setInterval(()=>reload().catch(reportError),15000);return()=>clearInterval(timer)},[reload,reportError]);
+  // Navigation comes from the build-time registry and is gated by the server
+  // list of enabled packages; a failed request falls back to every module and
+  // the server route still returns 404 for a disabled package.
+  useEffect(()=>{api('mcp/packages',{token}).then(rows=>{const enabled=new Set(rows.map(row=>row.id));setPackageNav(mcpModules.filter(item=>enabled.has(item.id)));}).catch(()=>setPackageNav(mcpModules));},[token]);
   useEffect(()=>{const change=()=>{setView(routeView());if(location.pathname==='/chat')setSelected(location.hash.slice(1)||null);};addEventListener('hashchange',change);addEventListener('popstate',change);return()=>{removeEventListener('hashchange',change);removeEventListener('popstate',change)}},[]);
 
   useEffect(()=>{
@@ -111,7 +120,7 @@ function App({session,onLogout}){
   useEffect(()=>{const element=textarea.current;if(element){element.style.height='auto';element.style.height=Math.min(element.scrollHeight,190)+'px';}},[draft]);
   useEffect(()=>{if(autoScroll.current&&viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;},[snapshot,loading]);
   const choose=(id,target)=>{if(!dispatchEvent(new Event('app:navigate',{cancelable:true})))return;if(target)setTargetId(target);setView('chat');setSelected(id);setMobileNav(false);setShowSettings(false);history.replaceState(null,'','/chat'+(id?'#'+id:''));};
-  const navigate=page=>{if(!dispatchEvent(new Event('app:navigate',{cancelable:true})))return;setView(page);setMobileNav(false);history.pushState(null,'',page==='chat'?'/chat'+(selected?'#'+selected:''):'/'+page);};
+  const navigate=(page,route)=>{if(!dispatchEvent(new Event('app:navigate',{cancelable:true})))return;setView(page);setMobileNav(false);history.pushState(null,'',route||(page==='chat'?'/chat'+(selected?'#'+selected:''):'/'+page));};
   const startChat=agent=>{choose(null,agent.id);setSnapshot(null);setDraft(sessionStorage.getItem('agent-draft:new:'+agent.id)||'');setModel(defaults.model);setEffort(defaults.effort||'high');setError('');setTimeout(()=>textarea.current?.focus(),0);};
   const openAgents=()=>{if(innerWidth<=720)setMobileNav(true);else agentList.current?.querySelector('button')?.focus();};
   useEffect(()=>{const shortcut=e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openAgents();}};addEventListener('keydown',shortcut);return()=>removeEventListener('keydown',shortcut);},[]);
@@ -142,7 +151,7 @@ function App({session,onLogout}){
     {mobileNav&&<div className="nav-overlay" onClick={()=>setMobileNav(false)}/>}
     <aside className={'sidebar '+(mobileNav?'mobile-open':'')}>
       <div className="brand"><button className="brand-home" aria-label="返回主页" onClick={()=>navigate('dashboard')}><div className="brand-mark"><span/></div><div>Agent Base<small>YOUR LOCAL AGENT WORKSPACE</small></div></button><button className="icon-button mobile-only" aria-label="关闭侧栏" onClick={()=>setMobileNav(false)}><X size={18}/></button></div>
-      <nav className="page-nav" aria-label="页面导航"><button className={view==='dashboard'?'active':''} onClick={()=>navigate('dashboard')}><Gauge size={15}/>仪表盘</button><button className={view==='services'?'active':''} onClick={()=>navigate('services')}><Server size={15}/>共享服务</button><button className={view==='knowledge'?'active':''} onClick={()=>navigate('knowledge')}><BookOpen size={15}/>知识库</button><button className={view==='chat'?'active':''} onClick={()=>navigate('chat')}><MessageSquare size={15}/>对话</button><button className={view==='cron'?'active':''} onClick={()=>navigate('cron')}><Clock3 size={15}/>定时任务</button></nav>
+      <nav className="page-nav" aria-label="页面导航"><button className={view==='dashboard'?'active':''} onClick={()=>navigate('dashboard')}><Gauge size={15}/>仪表盘</button><button className={view==='services'?'active':''} onClick={()=>navigate('services')}><Server size={15}/>共享服务</button><button className={view==='knowledge'?'active':''} onClick={()=>navigate('knowledge')}><BookOpen size={15}/>知识库</button>{packageNav.map(item=>{const Icon=moduleIcons[item.icon]||Server;return <button key={item.id} className={view==='mcp:'+item.id?'active':''} onClick={()=>navigate('mcp:'+item.id,item.route)}><Icon size={15}/>{item.label}</button>})}<button className={view==='chat'?'active':''} onClick={()=>navigate('chat')}><MessageSquare size={15}/>对话</button><button className={view==='cron'?'active':''} onClick={()=>navigate('cron')}><Clock3 size={15}/>定时任务</button></nav>
       <div className="section-label">AGENTS <span>{targets.length}</span><button aria-label="刷新 Agent 列表" onClick={()=>reload().catch(reportError)}><RefreshCw size={12}/></button></div>
       <p className="agent-create-hint">选择 Agent，发起新对话</p>
       <nav ref={agentList} className="agent-list" aria-label="Agent 列表">{targets.map(agent=><button key={agent.id} aria-label={`与 ${agent.name} 新建对话`} title={`与 ${agent.name} 新建对话`} disabled={!agent.available} className={'agent-item '+(targetId===agent.id&&view==='chat'?'selected':'')} onClick={()=>startChat(agent)}><span className={'agent-avatar '+(agent.kind==='admin'?'admin':'')}>{agent.kind==='admin'?<ShieldCheck size={17}/>:<Bot size={17}/>}</span><span className="agent-item-text">{agent.name}<small>{agent.kind==='admin'?'管理与调度':agent.available?'仓库 Agent':'服务已停用'}</small></span><Plus className="agent-create-plus" size={14}/></button>)}</nav>
@@ -152,7 +161,7 @@ function App({session,onLogout}){
       <nav className="history-list" aria-label="对话历史">{filtered.map(chat=><button key={chat.id} className={'history-item '+(selected===chat.id?'selected':'')} onClick={()=>choose(chat.id,chat.target)}><MessageSquare size={14}/><span>{chat.title}<small>{agentName(chat.target)}</small></span>{busy(chat.status)&&<span className="presence busy"/>}</button>)}{!filtered.length&&<p className="empty-history">{search?'没有找到相关对话':'你的对话会保存在这里'}</p>}</nav>
       <div className="sidebar-footer">{session?.authenticated?<div className="session-account"><User size={14}/><span>{session.user.display_name||session.user.username}</span><button aria-label="退出登录" title="退出登录" onClick={onLogout}><LogOut size={14}/></button></div>:<div className="session-account"><User size={14}/><a href={'/login?next='+encodeURIComponent(location.pathname+location.hash)}>账号登录</a></div>}<a href="/workbench"><LayoutDashboard size={15}/><span>工作台与 Repo 资源</span><ExternalLink size={12}/></a><button onClick={()=>setShowToken(true)}><KeyRound size={15}/><span>连接设置</span><span className="local-badge">LOCAL</span></button></div>
     </aside>
-    {view==='services'?<ServicesPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:view==='knowledge'?<KnowledgePage token={token} connectionRevision={connectionRevision} onOpenNav={()=>setMobileNav(true)}/>:view==='dashboard'?<DashboardPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)} onOpenChat={id=>choose(id)} onOpenSchedules={()=>navigate('cron')}/>:view==='cron'?<CronPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:<main className="main-panel">
+    {view.startsWith('mcp:')?(()=>{const item=mcpModules.find(module=>module.id===view.slice(4));if(!item)return null;const ModuleView=moduleViews.get(item.id);return <React.Suspense fallback={<div className="loading-state"><LoaderCircle className="spin" size={22}/>正在加载页面</div>}><ModuleView token={token} onOpenNav={()=>setMobileNav(true)}/></React.Suspense>})():view==='services'?<ServicesPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:view==='knowledge'?<KnowledgePage token={token} connectionRevision={connectionRevision} onOpenNav={()=>setMobileNav(true)}/>:view==='dashboard'?<DashboardPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)} onOpenChat={id=>choose(id)} onOpenSchedules={()=>navigate('cron')}/>:view==='cron'?<CronPage token={token} onError={reportError} onOpenNav={()=>setMobileNav(true)}/>:<main className="main-panel">
       <header className="topbar"><button className="icon-button mobile-only" aria-label="打开侧栏" onClick={()=>setMobileNav(true)}><Menu size={20}/></button><div className="conversation-heading"><div className="breadcrumb">{target.name}<ChevronRight size={12}/><span>对话</span></div><div className="title-row">{editing?<input className="title-input" value={titleDraft} autoFocus onChange={e=>setTitleDraft(e.target.value)} onBlur={rename} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();if(e.key==='Escape')setEditing(false)}}/>:<h1>{title}</h1>}{selected&&!editing&&<button className="icon-button" aria-label="重命名对话" onClick={()=>{setTitleDraft(title);setEditing(true)}}><Pencil size={13}/></button>}</div></div><div className="topbar-actions">{selected&&<span className={'connection '+(connected?'connected':'')}><span/>{connected?'已连接':'正在重连'}</span>}<button className={'icon-button '+(showSettings?'active':'')} aria-label="对话信息" onClick={()=>setShowSettings(!showSettings)}><SlidersHorizontal size={17}/></button>{selected&&<button className="icon-button" aria-label={isArchived?'恢复对话':'归档对话'} onClick={archive} disabled={!!activeTurn}><Archive size={17}/></button>}</div></header>
       {showSettings&&<section className="info-panel"><div><strong>当前 Agent</strong><span>{target.name}</span></div><div><strong>命名空间</strong><code>{target.namespace||'admin'}</code></div><div><strong>Skills</strong><span>{target.skills?.join(' · ')||'无额外技能'}</span></div><div><strong>MCP</strong><span>{target.mcp?.join(' · ')||'无额外服务'}</span></div>{snapshot?.conversation.native_id&&<div><strong>CLI Session</strong><code>{snapshot.conversation.native_id}</code></div>}{!!snapshot?.files?.length&&<div className="artifact-files"><strong>会话产物</strong>{snapshot.files.map(file=><button key={file.path} onClick={()=>download(file.path)}><ArrowDown size={12}/>{file.path}<small>{file.size} B</small></button>)}</div>}<p>每个对话保留独立上下文；仓库 Agent 复用已安装的技能和常驻 MCP。对话结束不会停止服务。</p></section>}
       <div className="transcript" ref={viewport} onScroll={e=>{const node=e.currentTarget;const close=node.scrollHeight-node.scrollTop-node.clientHeight<120;autoScroll.current=close;setNearBottom(close)}}>
